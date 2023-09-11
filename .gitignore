@@ -1,0 +1,7 @@
+# Local Files
+config/.env
+dist/
+
+# IDE Files
+**/.vscode
+**/.idea
