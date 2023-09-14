@@ -79,7 +79,7 @@ func (e *RuleEvaluation) Evaluate(posts []*redditJson.JSONEntryDataChildrenData,
 func getValue(post *redditJson.JSONEntryDataChildrenData, rule *database.Rule) (string, error) {
 	switch rule.TargetId {
 	case "author":
-		return post.Author_fullname, nil
+		return post.Author, nil
 	case "title":
 		return post.Title, nil
 	default:

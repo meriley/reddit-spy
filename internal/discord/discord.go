@@ -71,7 +71,7 @@ func (c *Client) SendMessage(data *evaluator.MatchingEvaluationResult) error {
 			Type:  discordgo.EmbedTypeLink,
 			Title: data.Post.Title,
 			Author: &discordgo.MessageEmbedAuthor{
-				Name: data.Post.Author_fullname,
+				Name: data.Post.Author,
 			},
 			Fields: []*discordgo.MessageEmbedField{
 				{

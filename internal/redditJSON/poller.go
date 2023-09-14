@@ -66,14 +66,14 @@ func (r *Poller) Stop() {
 
 type (
 	JSONEntryDataChildrenData struct {
-		Author_fullname string `json:"author_fullname"`
-		ID              string `json:"id"`
-		Permalink       string `json:"permalink"`
-		Selftext        string `json:"selftext"`
-		Subreddit       string `json:"subreddit"`
-		Thumbnail       string `json:"thumbnail"`
-		Title           string `json:"title"`
-		URL             string `json:"URL"`
+		Author    string `json:"author"`
+		ID        string `json:"id"`
+		Permalink string `json:"permalink"`
+		Selftext  string `json:"selftext"`
+		Subreddit string `json:"subreddit"`
+		Thumbnail string `json:"thumbnail"`
+		Title     string `json:"title"`
+		URL       string `json:"URL"`
 	}
 	JSONEntryDataChildren struct {
 		Data *JSONEntryDataChildrenData `json:"data"`
