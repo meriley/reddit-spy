@@ -65,6 +65,12 @@ func (c *Client) SendMessage(data *evaluator.MatchingEvaluationResult) error {
 	if doc := c.Bot.DatabaseClient.GetNotification(data.Post.ID, data.ServerID, data.ChannelID); doc != nil {
 		return nil
 	}
+	end := 1024
+	if end > len(data.Post.Selftext) {
+		end = len(data.Post.Selftext)
+	}
+	substring := data.Post.Selftext[:end]
+
 	message := &discordgo.MessageSend{
 		Embed: &discordgo.MessageEmbed{
 			URL:   data.Post.URL,
@@ -76,7 +82,7 @@ func (c *Client) SendMessage(data *evaluator.MatchingEvaluationResult) error {
 			Fields: []*discordgo.MessageEmbedField{
 				{
 					Name:   "Summary",
-					Value:  data.Post.Selftext[:1024],
+					Value:  substring,
 					Inline: true,
 				},
 			},

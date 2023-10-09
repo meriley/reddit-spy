@@ -15,7 +15,7 @@ import (
 const (
 	EnvMongoURI = "mongo.address"
 
-	DBNAME                   = "reddit-discord-bot.exe"
+	DBNAME                   = "reddit-discord-bot"
 	DBSubredditCollection    = "subreddits"
 	DBNotificationCollection = "notifications"
 )
