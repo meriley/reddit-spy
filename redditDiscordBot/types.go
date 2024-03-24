@@ -6,6 +6,6 @@ import (
 )
 
 type BotInterface interface {
-	AddSubredditPoller(subreddit string, responseChan chan []*redditJson.JSONEntryDataChildrenData) *redditJson.Poller
+	AddSubredditPoller(subreddit string, responseChan chan []*redditJson.RedditPost) *redditJson.Poller
 	SendMessage(data *evaluator.MatchingEvaluationResult) error
 }

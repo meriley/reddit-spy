@@ -5,6 +5,7 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/joho/godotenv"
 	"github.com/meriley/reddit-spy/internal/context"
+	dbstore "github.com/meriley/reddit-spy/internal/dbstore"
 	"github.com/meriley/reddit-spy/internal/discord"
 	"github.com/meriley/reddit-spy/internal/evaluator"
 	"github.com/meriley/reddit-spy/redditDiscordBot"
@@ -19,7 +20,11 @@ func main() {
 	}
 
 	ctx := context.NewContext()
-	bot, err := redditDiscordBot.New(ctx)
+	store, err := dbstore.New(ctx)
+	if err != nil {
+		panic(errors.Wrap(err, "failed to create db store"))
+	}
+	bot, err := redditDiscordBot.New(ctx, store)
 	if err != nil {
 		panic(errors.Wrap(err, "failed to create bot"))
 	}
@@ -28,7 +33,7 @@ func main() {
 		panic(errors.Wrap(err, "failed to create discord client"))
 	}
 	// Get Subreddits to Listen
-	subreddits, err := bot.DatabaseClient.GetSubreddits()
+	subreddits, err := bot.Store.GetSubreddits()
 	if err != nil {
 		panic(errors.Wrap(err, "failed to get subreddits"))
 	}
@@ -39,7 +44,7 @@ func main() {
 		bot.AddSubredditPoller(subreddit)
 	}
 
-	evaluate := evaluator.NewRuleEvaluator(ctx, bot.DatabaseClient)
+	evaluate := evaluator.NewRuleEvaluator(ctx, bot.Store)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {

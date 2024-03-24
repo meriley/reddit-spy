@@ -4,7 +4,10 @@ start:
 build:
 	go build -o ./dist/reddit-spy
 
-docker: docker-compose docker-prune
+docker: docker-upgrade docker-compose docker-prune
+
+docker-upgrade:
+	docker pull mongo:latest
 
 docker-compose:
 	docker-compose up --force-recreate --build -d

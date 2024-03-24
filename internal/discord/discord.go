@@ -62,7 +62,7 @@ func (c *Client) RegisterCommands() error {
 }
 
 func (c *Client) SendMessage(data *evaluator.MatchingEvaluationResult) error {
-	if doc := c.Bot.DatabaseClient.GetNotification(data.Post.ID, data.ServerID, data.ChannelID); doc != nil {
+	if doc := c.Bot.Store.GetNotification(data.Post.ID, data.ServerID, data.ChannelID); doc != nil {
 		return nil
 	}
 	end := 1024
@@ -98,7 +98,7 @@ func (c *Client) SendMessage(data *evaluator.MatchingEvaluationResult) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to send message")
 	}
-	if err := c.Bot.DatabaseClient.InsertNotification(data.Post.ID, data.ServerID, data.ChannelID, data.Post.Subreddit); err != nil {
+	if err := c.Bot.Store.InsertNotification(data.Post.ID, data.ServerID, data.ChannelID, data.Post.Subreddit); err != nil {
 		return errors.Wrap(err, "failed to insert notification into database")
 	}
 	return nil

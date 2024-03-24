@@ -5,8 +5,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
     depends_on:
       - mongo
     volumes:
@@ -18,8 +16,5 @@ services:
     ports:
       - "127.0.0.1:27017:27017"
     volumes:
-      - mongodata:/data/db
+      - /mnt/user/appdata/reddit-spy:/data/db
     restart: unless-stopped
-
-volumes:
-  mongodata:

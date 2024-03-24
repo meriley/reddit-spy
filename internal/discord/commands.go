@@ -2,11 +2,12 @@ package discord
 
 import (
 	"fmt"
+	database "github.com/meriley/reddit-spy/internal/dbstore"
+	"strings"
+
 	"github.com/bwmarrin/discordgo"
 	"github.com/go-kit/log/level"
-	"github.com/meriley/reddit-spy/internal/database"
 	"github.com/pkg/errors"
-	"strings"
 )
 
 func (c *Client) addSubredditListenerCommandConfig() CommandConfig {
@@ -55,12 +56,14 @@ func (c *Client) subredditListenerOptions() []*discordgo.ApplicationCommandOptio
 
 func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	data := i.ApplicationCommandData()
-	rule := &database.Rule{}
-	var subreddit string
+	rule := database.Rule{
+		DiscordServerID:  i.GuildID,
+		DiscordChannelID: i.ChannelID,
+	}
 	for _, option := range data.Options {
 		switch option.Name {
 		case "subreddit":
-			subreddit = strings.ToLower(option.Value.(string))
+			rule.SubredditID = strings.ToLower(option.Value.(string))
 		case "match_on":
 			rule.TargetId = strings.ToLower(option.Value.(string))
 		case "value":
@@ -73,7 +76,7 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 			)
 		}
 	}
-	if err := c.Bot.InsertRule(subreddit, i.GuildID, i.ChannelID, rule); err != nil {
+	if err := c.Bot.InsertRule(rule); err != nil {
 		if err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
@@ -82,17 +85,17 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 			},
 		}); err != nil {
 			level.Error(c.Ctx.Log()).Log("error", errors.Wrap(err, "failed to send interaction response on error").Error(),
-				"subreddit", subreddit,
-				"serverID", i.GuildID,
-				"channelID", i.ChannelID,
+				"subreddit", rule.SubredditID,
+				"serverID", rule.DiscordServerID,
+				"channelID", rule.DiscordChannelID,
 				"rule", fmt.Sprintf("%v", rule),
 			)
 			return
 		}
 		level.Error(c.Ctx.Log()).Log("error", errors.Wrap(err, "failed to create rule").Error(),
-			"subreddit", subreddit,
-			"serverID", i.GuildID,
-			"channelID", i.ChannelID,
+			"subreddit", rule.SubredditID,
+			"serverID", rule.DiscordServerID,
+			"channelID", rule.DiscordChannelID,
 			"rule", fmt.Sprintf("%v", rule),
 		)
 		return
@@ -105,9 +108,9 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 		},
 	}); err != nil {
 		level.Error(c.Ctx.Log()).Log("error", errors.Wrap(err, "failed to send interaction response on success").Error(),
-			"subreddit", subreddit,
-			"serverID", i.GuildID,
-			"channelID", i.ChannelID,
+			"subreddit", rule.SubredditID,
+			"serverID", rule.DiscordServerID,
+			"channelID", rule.DiscordChannelID,
 			"rule", fmt.Sprintf("%v", rule),
 		)
 	}
