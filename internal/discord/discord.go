@@ -2,13 +2,14 @@ package discord
 
 import (
 	"fmt"
+	"net/url"
+	"os"
+
 	"github.com/bwmarrin/discordgo"
+
 	"github.com/meriley/reddit-spy/internal/context"
 	"github.com/meriley/reddit-spy/internal/evaluator"
 	"github.com/meriley/reddit-spy/redditDiscordBot"
-	"github.com/pkg/errors"
-	"net/url"
-	"os"
 )
 
 type Client struct {
@@ -20,12 +21,12 @@ type Client struct {
 func New(ctx context.Ctx, bot *redditDiscordBot.RedditDiscordBot) (*Client, error) {
 	dg, err := discordgo.New("Bot " + os.Getenv("discord.token"))
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create discord session")
+		return nil, fmt.Errorf("failed to create discord session: %w", err)
 	}
 	dg.Identify.Intents = discordgo.IntentsGuilds
 	err = dg.Open()
 	if err != nil {
-		return nil, errors.Wrap(err, "error opening discord session")
+		return nil, fmt.Errorf("error opening discord session: %w", err)
 	}
 
 	client := &Client{
@@ -54,7 +55,7 @@ func (c *Client) RegisterCommands() error {
 	for _, cmdConfig := range commands {
 		_, err := c.Client.ApplicationCommandCreate(c.Client.State.Application.ID, "", cmdConfig.Command)
 		if err != nil {
-			return errors.Wrap(err, "failed to create application command")
+			return fmt.Errorf("failed to create application command: %w", err)
 		}
 		c.Client.AddHandler(cmdConfig.Handler)
 	}
@@ -62,27 +63,27 @@ func (c *Client) RegisterCommands() error {
 	return nil
 }
 
-func (c *Client) SendMessage(ctx context.Context, data *evaluator.MatchingEvaluationResult) error {
-	count, err := c.Bot.Store.GetNotificationCount(ctx, data.Post.ID, data.ChannelID, data.RuleID)
+func (c *Client) SendMessage(ctx context.Context, result *evaluator.MatchingEvaluationResult) error {
+	count, err := c.Bot.Store.GetNotificationCount(ctx, result.PostID, result.ChannelID, result.RuleID)
 	if err != nil {
-		return fmt.Errorf("unable to gte notification count: %w", err)
+		return fmt.Errorf("unable to get notification count: %w", err)
 	}
 	if count > 1 {
 		return nil
 	}
 	end := 1024
-	if end > len(data.Post.Selftext) {
-		end = len(data.Post.Selftext)
+	if end > len(result.Post.Selftext) {
+		end = len(result.Post.Selftext)
 	}
-	substring := data.Post.Selftext[:end]
+	substring := result.Post.Selftext[:end]
 
 	message := &discordgo.MessageSend{
 		Embed: &discordgo.MessageEmbed{
-			URL:   data.Post.URL,
+			URL:   result.Post.URL,
 			Type:  discordgo.EmbedTypeLink,
-			Title: data.Post.Title,
+			Title: result.Post.Title,
 			Author: &discordgo.MessageEmbedAuthor{
-				Name: data.Post.Author,
+				Name: result.Post.Author,
 			},
 			Fields: []*discordgo.MessageEmbedField{
 				{
@@ -93,18 +94,22 @@ func (c *Client) SendMessage(ctx context.Context, data *evaluator.MatchingEvalua
 			},
 		},
 	}
-	if u, err := url.ParseRequestURI(data.Post.Thumbnail); err == nil {
+	if u, err := url.ParseRequestURI(result.Post.Thumbnail); err == nil {
 		message.Embed.Thumbnail = &discordgo.MessageEmbedThumbnail{
 			URL: u.String(),
 		}
 	}
 
-	_, err = c.Client.ChannelMessageSendComplex(data.ChannelID, message)
+	ch, err := c.Bot.Store.GetDiscordChannel(ctx, result.ChannelID)
 	if err != nil {
-		return errors.Wrap(err, "failed to send message")
+		return fmt.Errorf("failed to get discord channel for id %d: %w", result.ChannelID, err)
 	}
-	if _, err := c.Bot.Store.InsertNotification(ctx, data.Post.ID, data.ChannelID, data.RuleID); err != nil {
-		return errors.Wrap(err, "failed to insert notification into database")
+	_, err = c.Client.ChannelMessageSendComplex(ch.ChannelID, message)
+	if err != nil {
+		return fmt.Errorf("failed to send message: %w", err)
+	}
+	if _, err := c.Bot.Store.InsertNotification(ctx, result.PostID, result.ChannelID, result.RuleID); err != nil {
+		return fmt.Errorf("failed to insert notification into database: %w", err)
 	}
 	return nil
 }

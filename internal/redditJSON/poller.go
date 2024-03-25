@@ -2,12 +2,13 @@ package redditJSON
 
 import (
 	"encoding/json"
-	"github.com/go-kit/log/level"
-	ctx "github.com/meriley/reddit-spy/internal/context"
-	"github.com/pkg/errors"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/go-kit/log/level"
+	ctx "github.com/meriley/reddit-spy/internal/context"
 )
 
 const (
@@ -101,7 +102,7 @@ func (r *Poller) getJSONEntries(url string) ([]*RedditPost, error) {
 	var entries JSONEntry
 	err = json.NewDecoder(resp.Body).Decode(&entries)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to decode json")
+		return nil, fmt.Errorf("failed to decode json :%w", err)
 	}
 
 	posts := make([]*RedditPost, 0, MAX_PAGINATION)

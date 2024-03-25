@@ -2,12 +2,12 @@ package discord
 
 import (
 	"fmt"
-	database "github.com/meriley/reddit-spy/internal/dbstore"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/go-kit/log/level"
-	"github.com/pkg/errors"
+
+	database "github.com/meriley/reddit-spy/internal/dbstore"
 )
 
 func (c *Client) addSubredditListenerCommandConfig() CommandConfig {
@@ -85,7 +85,7 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 				Content: "Failed to create new subreddit listener",
 			},
 		}); err != nil {
-			level.Error(c.Ctx.Log()).Log("error", errors.Wrap(err, "failed to send interaction response on error").Error(),
+			level.Error(c.Ctx.Log()).Log("error", fmt.Errorf("failed to send interaction response on error: %w", err).Error(),
 				"subreddit", rule.SubredditID,
 				"serverID", rule.DiscordServerID,
 				"channelID", rule.DiscordChannelID,
@@ -93,7 +93,7 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 			)
 			return
 		}
-		level.Error(c.Ctx.Log()).Log("error", errors.Wrap(err, "failed to create rule").Error(),
+		level.Error(c.Ctx.Log()).Log("error", fmt.Errorf("failed to create rule: %w", err).Error(),
 			"subreddit", rule.SubredditID,
 			"serverID", rule.DiscordServerID,
 			"channelID", rule.DiscordChannelID,
@@ -108,7 +108,7 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 			Content: "Rule Created Successfully!",
 		},
 	}); err != nil {
-		level.Error(c.Ctx.Log()).Log("error", errors.Wrap(err, "failed to send interaction response on success").Error(),
+		level.Error(c.Ctx.Log()).Log("error", fmt.Errorf("failed to send interaction response on success: %w", err).Error(),
 			"subreddit", rule.SubredditID,
 			"serverID", rule.DiscordServerID,
 			"channelID", rule.DiscordChannelID,

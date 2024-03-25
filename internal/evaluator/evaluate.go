@@ -2,11 +2,11 @@ package evaluator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
-	"sync"
 
-	"github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
 
 	dbstore "github.com/meriley/reddit-spy/internal/dbstore"
 	redditJson "github.com/meriley/reddit-spy/internal/redditJSON"
@@ -22,27 +22,32 @@ type RuleEvaluation struct {
 }
 
 type MatchingEvaluationResult struct {
-	ChannelID string
-	RuleID    string
+	ChannelID int
+	RuleID    int
+	PostID    int
 	Post      *redditJson.RedditPost
 }
 
 func (e *RuleEvaluation) Evaluate(ctx context.Context, posts []*redditJson.RedditPost, resultChannel chan *MatchingEvaluationResult) error {
 	for _, p := range posts {
-		subreddit := p.Subreddit
-		rules, err := e.Store.GetRules(ctx, subreddit)
+		subredditID := p.Subreddit
+		subreddit, err := e.Store.GetSubreddit(ctx, subredditID)
 		if err != nil {
-			return fmt.Errorf("failed to fetch rules for %s: %w", subreddit, err)
+			return fmt.Errorf("failed to get subreddit %s: %w", subredditID, err)
+		}
+		rules, err := e.Store.GetRules(ctx, subreddit.ID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch rules for %s: %w", subredditID, err)
 		}
 
-		var wg sync.WaitGroup
-		wg.Add(len(rules))
+		eg, egCtx := errgroup.WithContext(ctx)
 		for _, r := range rules {
-			go func(p *redditJson.RedditPost, r dbstore.Rule) {
-				defer wg.Done()
+			p := p
+			r := r
+			eg.Go(func() error {
 				value, err := getValue(p, r)
 				if err != nil {
-					return
+					return fmt.Errorf("failed to get value for post %s: %w", p.ID, err)
 				}
 
 				var result bool
@@ -53,15 +58,23 @@ func (e *RuleEvaluation) Evaluate(ctx context.Context, posts []*redditJson.Reddi
 				}
 
 				if result {
+					pID, err := e.Store.InsertPost(egCtx, p.ID)
+					if err != nil {
+						return fmt.Errorf("failed to insert post to store: %w", err)
+					}
 					resultChannel <- &MatchingEvaluationResult{
 						ChannelID: r.DiscordChannelID,
 						RuleID:    r.ID,
+						PostID:    pID,
 						Post:      p,
 					}
 				}
-			}(p, r)
+				return nil
+			})
 		}
-		wg.Wait()
+		if err := eg.Wait(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -1,10 +1,11 @@
 package context
 
 import (
+	"os"
+
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/log/level"
 	"golang.org/x/net/context"
-	"os"
 )
 
 type Context interface {

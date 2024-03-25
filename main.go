@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"sync"
+
 	"github.com/go-kit/log/level"
 	"github.com/joho/godotenv"
 	ctx "github.com/meriley/reddit-spy/internal/context"
@@ -10,33 +12,31 @@ import (
 	"github.com/meriley/reddit-spy/internal/discord"
 	"github.com/meriley/reddit-spy/internal/evaluator"
 	"github.com/meriley/reddit-spy/redditDiscordBot"
-	"github.com/pkg/errors"
-	"sync"
 )
 
 func main() {
 	err := godotenv.Load("config/.env")
 	if err != nil {
-		panic(errors.Wrap(err, "Error loading .env file"))
+		panic(fmt.Errorf("error loading .env file: %w", err))
 	}
 
 	ctx := ctx.New(context.Background())
 	store, err := dbstore.New(ctx)
 	if err != nil {
-		panic(errors.Wrap(err, "failed to create db store"))
+		panic(fmt.Errorf("failed to create db: %w", err))
 	}
 	bot, err := redditDiscordBot.New(ctx, store)
 	if err != nil {
-		panic(errors.Wrap(err, "failed to create bot"))
+		panic(fmt.Errorf("failed to create bot: %w", err))
 	}
 	discordClient, err := discord.New(ctx, bot)
 	if err != nil {
-		panic(errors.Wrap(err, "failed to create discord client"))
+		panic(fmt.Errorf("failed to create discord client: %w", err))
 	}
 	// Get Subreddits to Listen
 	subreddits, err := bot.Store.GetSubreddits(ctx)
 	if err != nil {
-		panic(errors.Wrap(err, "failed to get subreddits"))
+		panic(fmt.Errorf("failed to get subreddits: %w", err))
 	}
 	level.Info(ctx.Log()).Log("subreddits", fmt.Sprintf("%s", subreddits))
 
@@ -54,7 +54,7 @@ func main() {
 			select {
 			case posts := <-bot.PollerResponseChannel:
 				if err := evaluate.Evaluate(ctx, posts, evaluate.EvaluateResponseChannel); err != nil {
-					panic(errors.Wrap(err, "failed to evaluate rule"))
+					panic(fmt.Errorf("failed to evaluate rule: %w", err))
 				}
 			case result := <-evaluate.EvaluateResponseChannel:
 				if err := discordClient.SendMessage(ctx, result); err != nil {

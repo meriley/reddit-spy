@@ -3,13 +3,11 @@ package redditDiscordBot
 import (
 	"context"
 	"fmt"
-	dbstore "github.com/meriley/reddit-spy/internal/dbstore"
 	"time"
 
 	ctx "github.com/meriley/reddit-spy/internal/context"
+	dbstore "github.com/meriley/reddit-spy/internal/dbstore"
 	"github.com/meriley/reddit-spy/internal/redditJSON"
-
-	"github.com/pkg/errors"
 )
 
 type RedditDiscordBot struct {
@@ -45,21 +43,21 @@ func (b *RedditDiscordBot) CreateRule(
 ) error {
 	sID, err := b.Store.InsertDiscordServer(ctx, serverID)
 	if err != nil {
-		return errors.Wrap(err, "failed to insert discord server")
+		return fmt.Errorf("failed to insert discord server: %w", err)
 	}
 	cID, err := b.Store.InsertDiscordChannel(ctx, channelID, sID)
 	if err != nil {
-		return errors.Wrap(err, "failed to insert discord server")
+		return fmt.Errorf("failed to insert discord server: %w", err)
 	}
 	srID, err := b.Store.InsertSubreddit(ctx, subredditID)
 	if err != nil {
-		return errors.Wrap(err, "failed to insert discord server")
+		return fmt.Errorf("failed to insert discord server: %w", err)
 	}
 	rule.DiscordServerID = sID
 	rule.DiscordChannelID = cID
 	rule.SubredditID = srID
 	if _, err := b.Store.InsertRule(ctx, rule); err != nil {
-		return errors.Wrap(err, "failed to insert rule")
+		return fmt.Errorf("failed to insert rule: %w", err)
 	}
 	b.AddSubredditPoller(b.Ctx, srID)
 	return nil
