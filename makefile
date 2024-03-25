@@ -1,16 +1,18 @@
+.PHONY: start build docker docker-build
+
+ifeq ($(detected_OS),Windows)
+    TIMESTAMP := $(shell powershell -Command "Get-Date -Format yyyy.MM.dd.HHmmss")
+else
+    TIMESTAMP := $(shell date +%Y.%m.%d.%H.%M.%S)
+endif
+
 start:
 	go run .
 
 build:
 	go build -o ./dist/reddit-spy
 
-docker: docker-upgrade docker-compose docker-prune
+docker: docker-build
 
-docker-upgrade:
-	docker pull mongo:latest
-
-docker-compose:
-	docker-compose up --force-recreate --build -d
-
-docker-prune:
-	docker image prune -f
+docker-build:
+	docker build --build-arg APP_VERSION=$(TIMESTAMP) -t reddit-spy:$(TIMESTAMP) .
