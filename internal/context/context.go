@@ -8,32 +8,28 @@ import (
 )
 
 type Context interface {
-	Context() context.Context
+	context.Context
 	Log() log.Logger
-	Close()
 }
 
 type Ctx struct {
-	context context.Context
-	log     log.Logger
-	Done    chan struct{}
+	context.Context
+	log  log.Logger
+	Done chan struct{}
 }
 
-func (c *Ctx) Context() context.Context {
-	return c.context
-}
-func (c *Ctx) Log() log.Logger {
+func (c Ctx) Log() log.Logger {
 	return c.log
 }
 
-func NewContext() Ctx {
+func New(ctx context.Context) Ctx {
 	var logger log.Logger
 	logger = log.NewLogfmtLogger(os.Stderr)
 	logger = level.NewFilter(logger, level.AllowAll())
 	logger = log.With(logger, "ts", log.DefaultTimestampUTC)
 
 	return Ctx{
-		context: context.Background(),
+		Context: ctx,
 		log:     logger,
 		Done:    make(chan struct{}),
 	}

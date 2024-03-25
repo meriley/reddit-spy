@@ -1,13 +1,13 @@
 package evaluator
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
 
 	"github.com/pkg/errors"
 
-	"github.com/meriley/reddit-spy/internal/context"
 	dbstore "github.com/meriley/reddit-spy/internal/dbstore"
 	redditJson "github.com/meriley/reddit-spy/internal/redditJSON"
 )
@@ -17,21 +17,20 @@ type EvaluationInterface interface {
 }
 
 type RuleEvaluation struct {
-	Ctx                     context.Ctx
 	Store                   dbstore.Store
 	EvaluateResponseChannel chan *MatchingEvaluationResult
 }
 
 type MatchingEvaluationResult struct {
-	ServerID  string
 	ChannelID string
+	RuleID    string
 	Post      *redditJson.RedditPost
 }
 
-func (e *RuleEvaluation) Evaluate(posts []*redditJson.RedditPost, resultChannel chan *MatchingEvaluationResult) error {
+func (e *RuleEvaluation) Evaluate(ctx context.Context, posts []*redditJson.RedditPost, resultChannel chan *MatchingEvaluationResult) error {
 	for _, p := range posts {
 		subreddit := p.Subreddit
-		rules, err := e.Store.GetRules(subreddit)
+		rules, err := e.Store.GetRules(ctx, subreddit)
 		if err != nil {
 			return fmt.Errorf("failed to fetch rules for %s: %w", subreddit, err)
 		}
@@ -56,7 +55,7 @@ func (e *RuleEvaluation) Evaluate(posts []*redditJson.RedditPost, resultChannel 
 				if result {
 					resultChannel <- &MatchingEvaluationResult{
 						ChannelID: r.DiscordChannelID,
-						ServerID:  r.DiscordServerID,
+						RuleID:    r.ID,
 						Post:      p,
 					}
 				}
@@ -86,9 +85,8 @@ func evaluatePartial(value string, expected string) bool {
 	return strings.Contains(strings.ToLower(value), strings.ToLower(expected))
 }
 
-func NewRuleEvaluator(ctx context.Ctx, store dbstore.Store) *RuleEvaluation {
+func NewRuleEvaluator(store dbstore.Store) *RuleEvaluation {
 	return &RuleEvaluation{
-		Ctx:                     ctx,
 		Store:                   store,
 		EvaluateResponseChannel: make(chan *MatchingEvaluationResult, 10),
 	}

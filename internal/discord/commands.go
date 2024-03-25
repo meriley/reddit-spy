@@ -56,14 +56,15 @@ func (c *Client) subredditListenerOptions() []*discordgo.ApplicationCommandOptio
 
 func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	data := i.ApplicationCommandData()
-	rule := database.Rule{
-		DiscordServerID:  i.GuildID,
-		DiscordChannelID: i.ChannelID,
-	}
+	var (
+		rule        database.Rule
+		subredditID string
+	)
+
 	for _, option := range data.Options {
 		switch option.Name {
 		case "subreddit":
-			rule.SubredditID = strings.ToLower(option.Value.(string))
+			subredditID = strings.ToLower(option.Value.(string))
 		case "match_on":
 			rule.TargetId = strings.ToLower(option.Value.(string))
 		case "value":
@@ -76,7 +77,7 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 			)
 		}
 	}
-	if err := c.Bot.InsertRule(rule); err != nil {
+	if err := c.Bot.CreateRule(c.Ctx, i.GuildID, i.ChannelID, subredditID, rule); err != nil {
 		if err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{

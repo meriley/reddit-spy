@@ -3,7 +3,7 @@ package redditJSON
 import (
 	"encoding/json"
 	"github.com/go-kit/log/level"
-	"github.com/meriley/reddit-spy/internal/context"
+	ctx "github.com/meriley/reddit-spy/internal/context"
 	"github.com/pkg/errors"
 	"io"
 	"net/http"
@@ -23,14 +23,14 @@ type PollerInterface interface {
 
 type Poller struct {
 	PollerInterface
-	Context    context.Ctx
+	Context    ctx.Context
 	HttpClient *http.Client
 	Url        string
 	Timeout    time.Duration
 	Interval   time.Duration
 }
 
-func NewPoller(ctx context.Ctx, url string, interval time.Duration, timeout time.Duration) *Poller {
+func NewPoller(ctx ctx.Context, url string, interval time.Duration, timeout time.Duration) *Poller {
 	quit = make(chan struct{})
 	return &Poller{
 		Context:    ctx,

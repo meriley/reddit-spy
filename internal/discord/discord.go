@@ -1,6 +1,7 @@
 package discord
 
 import (
+	"fmt"
 	"github.com/bwmarrin/discordgo"
 	"github.com/meriley/reddit-spy/internal/context"
 	"github.com/meriley/reddit-spy/internal/evaluator"
@@ -61,8 +62,12 @@ func (c *Client) RegisterCommands() error {
 	return nil
 }
 
-func (c *Client) SendMessage(data *evaluator.MatchingEvaluationResult) error {
-	if doc := c.Bot.Store.GetNotification(data.Post.ID, data.ServerID, data.ChannelID); doc != nil {
+func (c *Client) SendMessage(ctx context.Context, data *evaluator.MatchingEvaluationResult) error {
+	count, err := c.Bot.Store.GetNotificationCount(ctx, data.Post.ID, data.ChannelID, data.RuleID)
+	if err != nil {
+		return fmt.Errorf("unable to gte notification count: %w", err)
+	}
+	if count > 1 {
 		return nil
 	}
 	end := 1024
@@ -94,11 +99,11 @@ func (c *Client) SendMessage(data *evaluator.MatchingEvaluationResult) error {
 		}
 	}
 
-	_, err := c.Client.ChannelMessageSendComplex(data.ChannelID, message)
+	_, err = c.Client.ChannelMessageSendComplex(data.ChannelID, message)
 	if err != nil {
 		return errors.Wrap(err, "failed to send message")
 	}
-	if err := c.Bot.Store.InsertNotification(data.Post.ID, data.ServerID, data.ChannelID, data.Post.Subreddit); err != nil {
+	if _, err := c.Bot.Store.InsertNotification(ctx, data.Post.ID, data.ChannelID, data.RuleID); err != nil {
 		return errors.Wrap(err, "failed to insert notification into database")
 	}
 	return nil
