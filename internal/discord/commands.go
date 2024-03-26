@@ -78,19 +78,20 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 		}
 	}
 	if err := c.Bot.CreateRule(c.Ctx, i.GuildID, i.ChannelID, subredditID, rule); err != nil {
-		if err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		if irErr := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
 				Flags:   discordgo.MessageFlagsEphemeral,
 				Content: "Failed to create new subreddit listener",
 			},
-		}); err != nil {
-			level.Error(c.Ctx.Log()).Log("error", fmt.Errorf("failed to send interaction response on error: %w", err).Error(),
-				"subreddit", rule.SubredditID,
-				"serverID", rule.DiscordServerID,
-				"channelID", rule.DiscordChannelID,
-				"rule", fmt.Sprintf("%v", rule),
-			)
+		}); irErr != nil {
+			level.Error(c.Ctx.Log()).
+				Log("error", fmt.Errorf("failed to send interaction response on error: %w", irErr).Error(),
+					"subreddit", rule.SubredditID,
+					"serverID", rule.DiscordServerID,
+					"channelID", rule.DiscordChannelID,
+					"rule", fmt.Sprintf("%v", rule),
+				)
 			return
 		}
 		level.Error(c.Ctx.Log()).Log("error", fmt.Errorf("failed to create rule: %w", err).Error(),
@@ -108,11 +109,12 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 			Content: "Rule Created Successfully!",
 		},
 	}); err != nil {
-		level.Error(c.Ctx.Log()).Log("error", fmt.Errorf("failed to send interaction response on success: %w", err).Error(),
-			"subreddit", rule.SubredditID,
-			"serverID", rule.DiscordServerID,
-			"channelID", rule.DiscordChannelID,
-			"rule", fmt.Sprintf("%v", rule),
-		)
+		level.Error(c.Ctx.Log()).
+			Log("error", fmt.Errorf("failed to send interaction response on success: %w", err).Error(),
+				"subreddit", rule.SubredditID,
+				"serverID", rule.DiscordServerID,
+				"channelID", rule.DiscordChannelID,
+				"rule", fmt.Sprintf("%v", rule),
+			)
 	}
 }

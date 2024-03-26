@@ -15,8 +15,7 @@ type Context interface {
 
 type Ctx struct {
 	context.Context
-	log  log.Logger
-	Done chan struct{}
+	log log.Logger
 }
 
 func (c Ctx) Log() log.Logger {
@@ -32,6 +31,5 @@ func New(ctx context.Context) Ctx {
 	return Ctx{
 		Context: ctx,
 		log:     logger,
-		Done:    make(chan struct{}),
 	}
 }

@@ -1,10 +1,7 @@
-.PHONY: start build docker docker-build
+.PHONY: start build docker docker-build docker-tag docker-push
 
-ifeq ($(detected_OS),Windows)
-    TIMESTAMP := $(shell powershell -Command "Get-Date -Format yyyy.MM.dd.HHmmss")
-else
-    TIMESTAMP := $(shell date +%Y.%m.%d.%H.%M.%S)
-endif
+VERSION := 2.0.3
+REGISTRY := 192.168.50.124:5000
 
 start:
 	go run .
@@ -12,7 +9,15 @@ start:
 build:
 	go build -o ./dist/reddit-spy
 
-docker: docker-build
+docker: docker-build docker-tag docker-push
 
 docker-build:
-	docker build --build-arg APP_VERSION=$(TIMESTAMP) -t reddit-spy:$(TIMESTAMP) .
+	docker build --build-arg APP_VERSION=$(VERSION) -t reddit-spy:$(VERSION) .
+
+docker-tag:
+	docker tag reddit-spy:$(VERSION) 192.168.50.124:5000/reddit-spy:$(VERSION)
+	docker tag 192.168.50.124:5000/reddit-spy:$(VERSION) 192.168.50.124:5000/reddit-spy:latest
+
+docker-push:
+	docker push 192.168.50.124:5000/reddit-spy:$(VERSION)
+	docker push 192.168.50.124:5000/reddit-spy:latest

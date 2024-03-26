@@ -7,6 +7,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	ctx "github.com/meriley/reddit-spy/internal/context"
@@ -19,27 +21,20 @@ const (
 	EnvPostgresPassword = "postgres.password"
 )
 
-type Rule struct {
-	ID               int
-	Target           string `bson:"target,omitempty"`
-	Exact            bool   `bson:"exact,omitempty"`
-	TargetId         string `bson:"targetId,omitempty"`
-	DiscordServerID  int
-	SubredditID      int
-	DiscordChannelID int
-}
-
 type Store interface {
-	InsertDiscordServer(ctx context.Context, serverID string) (id int, err error)
-	InsertDiscordChannel(ctx context.Context, channelID string, serverID int) (id int, err error)
-	InsertNotification(ctx context.Context, postID, channelID, ruleID int) (id int, err error)
-	InsertSubreddit(ctx context.Context, subredditID string) (id int, err error)
-	InsertRule(ctx context.Context, rule Rule) (id int, err error)
-	InsertPost(ctx context.Context, postID string) (id int, err error)
-	GetDiscordChannel(ctx context.Context, channelID int) (*Channel, error)
-	GetRules(ctx context.Context, subreddit int) ([]Rule, error)
-	GetSubreddits(ctx context.Context) ([]Subreddit, error)
-	GetSubreddit(ctx context.Context, subredditID string) (*Subreddit, error)
+	InsertDiscordServer(ctx context.Context, serverID string) (*DiscordServer, error)
+	InsertDiscordChannel(ctx context.Context, channelID string, serverID int) (*DiscordChannel, error)
+	InsertNotification(ctx context.Context, postID, channelID, ruleID int) (*Notification, error)
+	InsertSubreddit(ctx context.Context, subredditID string) (*Subreddit, error)
+	InsertRule(ctx context.Context, rule Rule) (*Rule, error)
+	InsertPost(ctx context.Context, postID string) (*Post, error)
+
+	GetDiscordServerByExternalID(ctx context.Context, serverID string) (*DiscordServer, error)
+	GetSubredditByExternalID(ctx context.Context, subreddit string) (*Subreddit, error)
+
+	GetDiscordChannel(ctx context.Context, channelID int) (*DiscordChannel, error)
+	GetRules(ctx context.Context, subreddit int) ([]*Rule, error)
+	GetSubreddits(ctx context.Context) ([]*Subreddit, error)
 	GetNotificationCount(ctx context.Context, postID, channelID, ruleID int) (int, error)
 }
 
@@ -78,64 +73,95 @@ func New(ctx ctx.Context) (*PGXStore, error) {
 	return &PGXStore{Pool: pool}, nil
 }
 
-func (db *PGXStore) InsertDiscordChannel(ctx context.Context, channelID string, serverID int) (id int, err error) {
+type DiscordServer struct {
+	ID         int
+	ExternalID string
+}
+
+func (db *PGXStore) InsertDiscordServer(ctx context.Context, serverID string) (*DiscordServer, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	sql := `INSERT INTO 
-    	discord_channels (
-    		channel_id, 
-    	    server_id
-    	) VALUES ($1, $2) ON CONFLICT (channel_id) DO NOTHING RETURNING id`
-	if err := db.QueryRow(ctx, sql, channelID, serverID).Scan(&id); err != nil {
-		return -1, fmt.Errorf("failed to insert data: %w", err)
+	var s DiscordServer
+	sql := `INSERT INTO discord_servers (server_id) VALUES ($1) ON CONFLICT (server_id) DO NOTHING RETURNING id, server_id`
+	if err := db.QueryRow(ctx, sql, serverID).Scan(&s.ID, &s.ExternalID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.GetDiscordServerByExternalID(ctx, serverID)
+		}
+		return nil, fmt.Errorf("failed to insert server: %w", err)
 	}
 
-	return id, nil
+	return &s, nil
 }
 
-type Channel struct {
-	ID        int
-	ChannelID string
-}
-
-func (db *PGXStore) GetDiscordChannel(ctx context.Context, channelID int) (*Channel, error) {
+func (db *PGXStore) GetDiscordServerByExternalID(ctx context.Context, serverID string) (*DiscordServer, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	sql := `SELECT id, channel_id FROM discord_channels where id = $1`
+	sql := `SELECT id, server_id FROM discord_servers where server_id = $1`
 
-	row := db.QueryRow(ctx, sql, channelID)
-	var ch Channel
-	if err := row.Scan(&ch.ID, &ch.ChannelID); err != nil {
+	row := db.QueryRow(ctx, sql, serverID)
+	var ch DiscordServer
+	if err := row.Scan(&ch.ID, &ch.ExternalID); err != nil {
 		return nil, fmt.Errorf("failed to scan row: %w", err)
 	}
 
 	return &ch, nil
 }
 
-func (db *PGXStore) InsertDiscordServer(ctx context.Context, serverID string) (id int, err error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	sql := `INSERT INTO discord_servers (server_id) VALUES ($1) ON CONFLICT (server_id) DO NOTHING RETURNING id`
-	if err = db.QueryRow(ctx, sql, serverID).Scan(&id); err != nil {
-		return -1, fmt.Errorf("failed to insert data: %w", err)
-	}
-
-	return id, nil
+type DiscordChannel struct {
+	ID         int
+	ExternalID string
 }
 
-func (db *PGXStore) InsertNotification(ctx context.Context, postID, channelID, ruleID int) (id int, err error) {
+func (db *PGXStore) InsertDiscordChannel(ctx context.Context, channelID string, serverID int) (*DiscordChannel, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	sql := `INSERT INTO notifications (post_id, channel_id, rule_id) VALUES ($1, $2, $3)`
-	if err := db.QueryRow(ctx, sql, postID, channelID, ruleID).Scan(&id); err != nil {
-		return -1, fmt.Errorf("failed to insert data: %w", err)
+	var c DiscordChannel
+	sql := `INSERT INTO 
+    	discord_channels (
+    		channel_id, 
+    	    server_id
+    	) VALUES ($1, $2) ON CONFLICT (channel_id) DO NOTHING RETURNING id, channel_id`
+	if err := db.QueryRow(ctx, sql, channelID, serverID).Scan(&c.ID, &c.ExternalID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.GetDiscordChannelByExternalID(ctx, channelID)
+		}
+		return nil, fmt.Errorf("failed to insert channel: %w", err)
 	}
 
-	return id, nil
+	return &c, nil
+}
+
+func (db *PGXStore) GetDiscordChannel(ctx context.Context, channelID int) (*DiscordChannel, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	sql := `SELECT id, channel_id FROM discord_channels where id = $1`
+
+	row := db.QueryRow(ctx, sql, channelID)
+	var ch DiscordChannel
+	if err := row.Scan(&ch.ID, &ch.ExternalID); err != nil {
+		return nil, fmt.Errorf("failed to scan row: %w", err)
+	}
+
+	return &ch, nil
+}
+
+func (db *PGXStore) GetDiscordChannelByExternalID(ctx context.Context, channelID string) (*DiscordChannel, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	sql := `SELECT id, channel_id FROM discord_channels where channel_id = $1`
+
+	row := db.QueryRow(ctx, sql, channelID)
+	var ch DiscordChannel
+	if err := row.Scan(&ch.ID, &ch.ExternalID); err != nil {
+		return nil, fmt.Errorf("failed to scan row: %w", err)
+	}
+
+	return &ch, nil
 }
 
 type Notification struct {
@@ -143,6 +169,35 @@ type Notification struct {
 	PostID    int
 	ChannelID int
 	RuleID    int
+}
+
+func (db *PGXStore) InsertNotification(ctx context.Context, postID, channelID, ruleID int) (*Notification, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	var n Notification
+	sql := `INSERT INTO notifications (post_id, channel_id, rule_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING RETURNING id, post_id, channel_id, rule_id`
+	if err := db.QueryRow(ctx, sql, postID, channelID, ruleID).Scan(&n.ID, &n.PostID, &n.ChannelID, &n.RuleID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.GetNotification(ctx, postID, channelID, ruleID)
+		}
+		return nil, fmt.Errorf("failed to insert data: %w", err)
+	}
+
+	return &n, nil
+}
+
+func (db *PGXStore) GetNotification(ctx context.Context, postID, channelID, ruleID int) (*Notification, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	var n Notification
+	sql := `SELECT id, post_id, channel_id, rule_id FROM notifications WHERE post_id = $1 AND channel_id = $2 AND rule_id = $3`
+	row := db.QueryRow(ctx, sql, postID, channelID, ruleID)
+	if err := row.Scan(&n.ID, &n.PostID, &n.ChannelID, &n.RuleID); err != nil {
+		return nil, fmt.Errorf("failed to scan row: %w", err)
+	}
+	return &n, nil
 }
 
 func (db *PGXStore) GetNotificationCount(ctx context.Context, postID, channelID, ruleID int) (int, error) {
@@ -160,36 +215,62 @@ func (db *PGXStore) GetNotificationCount(ctx context.Context, postID, channelID,
 	return count, nil
 }
 
-func (db *PGXStore) InsertPost(ctx context.Context, postID string) (id int, err error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	sql := `INSERT INTO posts (post_id) VALUES ($1) ON CONFLICT (post_id) DO NOTHING RETURNING id`
-	if err = db.QueryRow(ctx, sql, postID).Scan(&id); err != nil {
-		return -1, fmt.Errorf("failed to insert data: %w", err)
-	}
-
-	return id, nil
+type Post struct {
+	ID         int
+	ExternalID string
 }
 
-func (db *PGXStore) InsertSubreddit(ctx context.Context, subredditID string) (id int, err error) {
+func (db *PGXStore) InsertPost(ctx context.Context, postID string) (*Post, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	sql := `INSERT INTO subreddits (subreddit_id) VALUES ($1) ON CONFLICT (subreddit_id) DO NOTHING`
-	if err := db.QueryRow(ctx, sql, subredditID).Scan(&id); err != nil {
-		return -1, fmt.Errorf("failed to insert data: %w", err)
+	var p Post
+	sql := `INSERT INTO posts (post_id) VALUES ($1) ON CONFLICT (post_id) DO NOTHING RETURNING id, post_id`
+	if err := db.QueryRow(ctx, sql, postID).Scan(&p.ID, &p.ExternalID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.GetPostByExternalID(ctx, postID)
+		}
+		return nil, fmt.Errorf("failed to insert data: %w", err)
 	}
 
-	return id, nil
+	return &p, nil
+}
+
+func (db *PGXStore) GetPostByExternalID(ctx context.Context, postID string) (*Post, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	sql := `SELECT id, post_id FROM posts WHERE post_id = $1`
+	var p Post
+	if err := db.QueryRow(ctx, sql, postID).Scan(&p.ID, &p.ExternalID); err != nil {
+		return nil, fmt.Errorf("failed to insert data: %w", err)
+	}
+
+	return &p, nil
 }
 
 type Subreddit struct {
-	ID          int
-	SubredditID string
+	ID         int
+	ExternalID string
 }
 
-func (db *PGXStore) GetSubreddit(ctx context.Context, subredditID string) (*Subreddit, error) {
+func (db *PGXStore) InsertSubreddit(ctx context.Context, subredditID string) (*Subreddit, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	var s Subreddit
+	sql := `INSERT INTO subreddits (subreddit_id) VALUES ($1) ON CONFLICT (subreddit_id) DO NOTHING RETURNING id, subreddit_id`
+	if err := db.QueryRow(ctx, sql, subredditID).Scan(&s.ID, &s.ExternalID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.GetSubredditByExternalID(ctx, subredditID)
+		}
+		return nil, fmt.Errorf("failed to insert data: %w", err)
+	}
+
+	return &s, nil
+}
+
+func (db *PGXStore) GetSubredditByExternalID(ctx context.Context, subredditID string) (*Subreddit, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -197,14 +278,14 @@ func (db *PGXStore) GetSubreddit(ctx context.Context, subredditID string) (*Subr
 
 	row := db.QueryRow(ctx, sql, subredditID)
 	var sr Subreddit
-	if err := row.Scan(&sr.ID, &sr.SubredditID); err != nil {
+	if err := row.Scan(&sr.ID, &sr.ExternalID); err != nil {
 		return nil, fmt.Errorf("failed to scan row: %w", err)
 	}
 
 	return &sr, nil
 }
 
-func (db *PGXStore) GetSubreddits(ctx context.Context) ([]Subreddit, error) {
+func (db *PGXStore) GetSubreddits(ctx context.Context) ([]*Subreddit, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -215,19 +296,29 @@ func (db *PGXStore) GetSubreddits(ctx context.Context) ([]Subreddit, error) {
 		return nil, fmt.Errorf("failed to fetch subreddits: %w", err)
 	}
 
-	var subreddits []Subreddit
+	var subreddits []*Subreddit
 	for rows.Next() {
 		var sr Subreddit
-		if err := rows.Scan(&sr.ID, &sr.SubredditID); err != nil {
+		if err := rows.Scan(&sr.ID, &sr.ExternalID); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
-		subreddits = append(subreddits, sr)
+		subreddits = append(subreddits, &sr)
 	}
 
 	return subreddits, nil
 }
 
-func (db *PGXStore) InsertRule(ctx context.Context, rule Rule) (id int, err error) {
+type Rule struct {
+	ID               int
+	Target           string
+	Exact            bool
+	TargetId         string
+	DiscordServerID  int
+	SubredditID      int
+	DiscordChannelID int
+}
+
+func (db *PGXStore) InsertRule(ctx context.Context, rule Rule) (*Rule, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -238,16 +329,16 @@ func (db *PGXStore) InsertRule(ctx context.Context, rule Rule) (id int, err erro
 		   exact, 
 		   channel_id, 
 		   subreddit_id
-		) VALUES ($1, $2, $3, $4, $5)`
+		) VALUES ($1, $2, $3, $4, $5) RETURNING id`
 
-	if err := db.QueryRow(ctx, sql, rule.Target, rule.TargetId, rule.Exact, rule.DiscordChannelID, rule.SubredditID).Scan(&id); err != nil {
-		return -1, fmt.Errorf("failed to insert data: %w", err)
+	if err := db.QueryRow(ctx, sql, rule.Target, rule.TargetId, rule.Exact, rule.DiscordChannelID, rule.SubredditID).Scan(&rule.ID); err != nil {
+		return nil, fmt.Errorf("failed to insert data: %w", err)
 	}
 
-	return id, nil
+	return &rule, nil
 }
 
-func (db *PGXStore) GetRules(ctx context.Context, subreddit int) ([]Rule, error) {
+func (db *PGXStore) GetRules(ctx context.Context, subreddit int) ([]*Rule, error) {
 	// Use a context with a timeout to avoid hanging queries
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -274,7 +365,7 @@ func (db *PGXStore) GetRules(ctx context.Context, subreddit int) ([]Rule, error)
 		return nil, fmt.Errorf("failed to query data: %w", err)
 	}
 
-	var rules []Rule
+	var rules []*Rule
 	for rows.Next() {
 		var r Rule
 		if err := rows.Scan(
@@ -288,7 +379,7 @@ func (db *PGXStore) GetRules(ctx context.Context, subreddit int) ([]Rule, error)
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
-		rules = append(rules, r)
+		rules = append(rules, &r)
 	}
 
 	return rules, nil

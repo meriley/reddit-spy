@@ -28,10 +28,14 @@ type MatchingEvaluationResult struct {
 	Post      *redditJson.RedditPost
 }
 
-func (e *RuleEvaluation) Evaluate(ctx context.Context, posts []*redditJson.RedditPost, resultChannel chan *MatchingEvaluationResult) error {
+func (e *RuleEvaluation) Evaluate(
+	ctx context.Context,
+	posts []*redditJson.RedditPost,
+	resultChannel chan *MatchingEvaluationResult,
+) error {
 	for _, p := range posts {
 		subredditID := p.Subreddit
-		subreddit, err := e.Store.GetSubreddit(ctx, subredditID)
+		subreddit, err := e.Store.GetSubredditByExternalID(ctx, subredditID)
 		if err != nil {
 			return fmt.Errorf("failed to get subreddit %s: %w", subredditID, err)
 		}
@@ -58,14 +62,14 @@ func (e *RuleEvaluation) Evaluate(ctx context.Context, posts []*redditJson.Reddi
 				}
 
 				if result {
-					pID, err := e.Store.InsertPost(egCtx, p.ID)
+					dbP, err := e.Store.InsertPost(egCtx, p.ID)
 					if err != nil {
 						return fmt.Errorf("failed to insert post to store: %w", err)
 					}
 					resultChannel <- &MatchingEvaluationResult{
 						ChannelID: r.DiscordChannelID,
 						RuleID:    r.ID,
-						PostID:    pID,
+						PostID:    dbP.ID,
 						Post:      p,
 					}
 				}
@@ -79,7 +83,7 @@ func (e *RuleEvaluation) Evaluate(ctx context.Context, posts []*redditJson.Reddi
 	return nil
 }
 
-func getValue(post *redditJson.RedditPost, rule dbstore.Rule) (string, error) {
+func getValue(post *redditJson.RedditPost, rule *dbstore.Rule) (string, error) {
 	switch rule.TargetId {
 	case "author":
 		return post.Author, nil

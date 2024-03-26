@@ -19,17 +19,18 @@ type RedditDiscordBot struct {
 
 func (b *RedditDiscordBot) AddSubredditPoller(
 	ctx ctx.Context,
-	subreddit int,
+	subreddit *dbstore.Subreddit,
 ) *redditJSON.Poller {
-	if poller, found := b.Pollers[subreddit]; found {
+	if poller, found := b.Pollers[subreddit.ID]; found {
 		return poller
 	}
 	poller := redditJSON.NewPoller(
 		ctx,
-		fmt.Sprintf("https://www.reddit.com/r/%s/.json", subreddit),
+		fmt.Sprintf("https://www.reddit.com/r/%s/.json", subreddit.ExternalID),
 		30*time.Second,
 		5*time.Second,
 	)
+	b.Pollers[subreddit.ID] = poller
 	poller.Start(b.PollerResponseChannel)
 	return poller
 }
@@ -41,25 +42,25 @@ func (b *RedditDiscordBot) CreateRule(
 	subredditID string,
 	rule dbstore.Rule,
 ) error {
-	sID, err := b.Store.InsertDiscordServer(ctx, serverID)
+	s, err := b.Store.InsertDiscordServer(ctx, serverID)
 	if err != nil {
 		return fmt.Errorf("failed to insert discord server: %w", err)
 	}
-	cID, err := b.Store.InsertDiscordChannel(ctx, channelID, sID)
+	c, err := b.Store.InsertDiscordChannel(ctx, channelID, s.ID)
 	if err != nil {
 		return fmt.Errorf("failed to insert discord server: %w", err)
 	}
-	srID, err := b.Store.InsertSubreddit(ctx, subredditID)
+	sr, err := b.Store.InsertSubreddit(ctx, subredditID)
 	if err != nil {
 		return fmt.Errorf("failed to insert discord server: %w", err)
 	}
-	rule.DiscordServerID = sID
-	rule.DiscordChannelID = cID
-	rule.SubredditID = srID
+	rule.DiscordServerID = s.ID
+	rule.DiscordChannelID = c.ID
+	rule.SubredditID = sr.ID
 	if _, err := b.Store.InsertRule(ctx, rule); err != nil {
 		return fmt.Errorf("failed to insert rule: %w", err)
 	}
-	b.AddSubredditPoller(b.Ctx, srID)
+	b.AddSubredditPoller(b.Ctx, sr)
 	return nil
 }
 

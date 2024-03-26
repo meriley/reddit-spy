@@ -38,11 +38,11 @@ func main() {
 	if err != nil {
 		panic(fmt.Errorf("failed to get subreddits: %w", err))
 	}
-	level.Info(ctx.Log()).Log("subreddits", fmt.Sprintf("%s", subreddits))
+	level.Info(ctx.Log()).Log("subreddits", fmt.Sprintf("%v", subreddits))
 
 	// Start Polling For Reddit Posts
 	for _, subreddit := range subreddits {
-		bot.AddSubredditPoller(ctx, subreddit.ID)
+		bot.AddSubredditPoller(ctx, subreddit)
 	}
 
 	evaluate := evaluator.NewRuleEvaluator(store)
@@ -60,7 +60,7 @@ func main() {
 				if err := discordClient.SendMessage(ctx, result); err != nil {
 					panic(err)
 				}
-			case <-ctx.Done:
+			case <-ctx.Done():
 				close(bot.PollerResponseChannel)
 				close(evaluate.EvaluateResponseChannel)
 				level.Info(ctx.Log()).Log("msg", "application terminated")

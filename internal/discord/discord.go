@@ -104,7 +104,7 @@ func (c *Client) SendMessage(ctx context.Context, result *evaluator.MatchingEval
 	if err != nil {
 		return fmt.Errorf("failed to get discord channel for id %d: %w", result.ChannelID, err)
 	}
-	_, err = c.Client.ChannelMessageSendComplex(ch.ChannelID, message)
+	_, err = c.Client.ChannelMessageSendComplex(ch.ExternalID, message)
 	if err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
