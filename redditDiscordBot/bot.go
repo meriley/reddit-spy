@@ -11,14 +11,14 @@ import (
 )
 
 type RedditDiscordBot struct {
-	Ctx                   ctx.Context
+	Ctx                   ctx.Ctx
 	Store                 dbstore.Store
 	Pollers               map[int]*redditJSON.Poller
 	PollerResponseChannel chan []*redditJSON.RedditPost
 }
 
 func (b *RedditDiscordBot) AddSubredditPoller(
-	ctx ctx.Context,
+	ctx ctx.Ctx,
 	subreddit *dbstore.Subreddit,
 ) *redditJSON.Poller {
 	if poller, found := b.Pollers[subreddit.ID]; found {
@@ -64,7 +64,7 @@ func (b *RedditDiscordBot) CreateRule(
 	return nil
 }
 
-func New(ctx ctx.Context, store dbstore.Store) (*RedditDiscordBot, error) {
+func New(ctx ctx.Ctx, store dbstore.Store) (*RedditDiscordBot, error) {
 	return &RedditDiscordBot{
 		Ctx:                   ctx,
 		Store:                 store,

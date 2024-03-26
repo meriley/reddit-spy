@@ -72,7 +72,7 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 		case "exact":
 			rule.Exact = option.Value.(bool)
 		default:
-			level.Error(c.Ctx.Log()).Log("error", "unexpected key",
+			_ = level.Error(c.Ctx.Log()).Log("error", "unexpected key",
 				"key", option.Name,
 			)
 		}
@@ -85,7 +85,7 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 				Content: "Failed to create new subreddit listener",
 			},
 		}); irErr != nil {
-			level.Error(c.Ctx.Log()).
+			_ = level.Error(c.Ctx.Log()).
 				Log("error", fmt.Errorf("failed to send interaction response on error: %w", irErr).Error(),
 					"subreddit", rule.SubredditID,
 					"serverID", rule.DiscordServerID,
@@ -94,7 +94,7 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 				)
 			return
 		}
-		level.Error(c.Ctx.Log()).Log("error", fmt.Errorf("failed to create rule: %w", err).Error(),
+		_ = level.Error(c.Ctx.Log()).Log("error", fmt.Errorf("failed to create rule: %w", err).Error(),
 			"subreddit", rule.SubredditID,
 			"serverID", rule.DiscordServerID,
 			"channelID", rule.DiscordChannelID,
@@ -109,7 +109,7 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 			Content: "Rule Created Successfully!",
 		},
 	}); err != nil {
-		level.Error(c.Ctx.Log()).
+		_ = level.Error(c.Ctx.Log()).
 			Log("error", fmt.Errorf("failed to send interaction response on success: %w", err).Error(),
 				"subreddit", rule.SubredditID,
 				"serverID", rule.DiscordServerID,

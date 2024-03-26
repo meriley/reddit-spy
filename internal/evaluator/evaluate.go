@@ -95,7 +95,7 @@ func getValue(post *redditJson.RedditPost, rule *dbstore.Rule) (string, error) {
 }
 
 func evaluateExact(value string, expected string) bool {
-	return strings.ToLower(value) == strings.ToLower(expected)
+	return strings.EqualFold(value, expected)
 }
 
 func evaluatePartial(value string, expected string) bool {

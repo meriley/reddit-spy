@@ -13,12 +13,12 @@ import (
 )
 
 type Client struct {
-	Ctx    context.Ctx
+	Ctx    context.RedditSpyCtx
 	Client *discordgo.Session
 	Bot    *redditDiscordBot.RedditDiscordBot
 }
 
-func New(ctx context.Ctx, bot *redditDiscordBot.RedditDiscordBot) (*Client, error) {
+func New(ctx context.RedditSpyCtx, bot *redditDiscordBot.RedditDiscordBot) (*Client, error) {
 	dg, err := discordgo.New("Bot " + os.Getenv("discord.token"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create discord session: %w", err)
@@ -63,7 +63,7 @@ func (c *Client) RegisterCommands() error {
 	return nil
 }
 
-func (c *Client) SendMessage(ctx context.Context, result *evaluator.MatchingEvaluationResult) error {
+func (c *Client) SendMessage(ctx context.Ctx, result *evaluator.MatchingEvaluationResult) error {
 	count, err := c.Bot.Store.GetNotificationCount(ctx, result.PostID, result.ChannelID, result.RuleID)
 	if err != nil {
 		return fmt.Errorf("unable to get notification count: %w", err)

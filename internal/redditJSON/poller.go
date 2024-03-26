@@ -3,7 +3,6 @@ package redditJSON
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -24,14 +23,14 @@ type PollerInterface interface {
 
 type Poller struct {
 	PollerInterface
-	Context    ctx.Context
+	Context    ctx.Ctx
 	HttpClient *http.Client
 	Url        string
 	Timeout    time.Duration
 	Interval   time.Duration
 }
 
-func NewPoller(ctx ctx.Context, url string, interval time.Duration, timeout time.Duration) *Poller {
+func NewPoller(ctx ctx.Ctx, url string, interval time.Duration, timeout time.Duration) *Poller {
 	quit = make(chan struct{})
 	return &Poller{
 		Context:    ctx,
@@ -50,7 +49,7 @@ func (r *Poller) Start(c chan []*RedditPost) {
 			case <-ticker.C:
 				feed, err := r.getJSONEntries(r.Url)
 				if err != nil {
-					level.Error(r.Context.Log()).Log("error", err.Error())
+					_ = level.Error(r.Context.Log()).Log("error", err.Error())
 				}
 				c <- feed
 			case <-quit:
@@ -92,12 +91,7 @@ func (r *Poller) getJSONEntries(url string) ([]*RedditPost, error) {
 	if err != nil || resp.StatusCode != 200 {
 		return nil, err
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			level.Error(r.Context.Log()).Log("error", err.Error())
-		}
-	}(resp.Body)
+	defer resp.Body.Close()
 
 	var entries JSONEntry
 	err = json.NewDecoder(resp.Body).Decode(&entries)

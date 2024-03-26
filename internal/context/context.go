@@ -8,27 +8,27 @@ import (
 	"golang.org/x/net/context"
 )
 
-type Context interface {
+type Ctx interface {
 	context.Context
 	Log() log.Logger
 }
 
-type Ctx struct {
+type RedditSpyCtx struct {
 	context.Context
 	log log.Logger
 }
 
-func (c Ctx) Log() log.Logger {
+func (c RedditSpyCtx) Log() log.Logger {
 	return c.log
 }
 
-func New(ctx context.Context) Ctx {
+func New(ctx context.Context) RedditSpyCtx {
 	var logger log.Logger
 	logger = log.NewLogfmtLogger(os.Stderr)
 	logger = level.NewFilter(logger, level.AllowAll())
 	logger = log.With(logger, "ts", log.DefaultTimestampUTC)
 
-	return Ctx{
+	return RedditSpyCtx{
 		Context: ctx,
 		log:     logger,
 	}

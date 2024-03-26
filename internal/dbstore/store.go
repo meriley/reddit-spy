@@ -42,7 +42,7 @@ type PGXStore struct {
 	*pgxpool.Pool
 }
 
-func New(ctx ctx.Context) (*PGXStore, error) {
+func New(ctx ctx.Ctx) (*PGXStore, error) {
 	uri := os.Getenv(EnvPostgresURI)
 	if uri == "" {
 		return nil, errors.New("expected postgres address")
@@ -360,10 +360,10 @@ func (db *PGXStore) GetRules(ctx context.Context, subreddit int) ([]*Rule, error
 	`
 
 	rows, err := db.Query(ctx, sql, subreddit)
-	defer rows.Close()
 	if err != nil {
 		return nil, fmt.Errorf("failed to query data: %w", err)
 	}
+	defer rows.Close()
 
 	var rules []*Rule
 	for rows.Next() {

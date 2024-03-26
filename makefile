@@ -1,10 +1,13 @@
-.PHONY: start build docker docker-build docker-tag docker-push
+.PHONY: start build lint docker docker-build docker-tag docker-push
 
 VERSION := 2.0.3
 REGISTRY := 192.168.50.124:5000
 
 start:
 	go run .
+
+lint:
+	golangci-lint run --verbose
 
 build:
 	go build -o ./dist/reddit-spy

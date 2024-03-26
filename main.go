@@ -15,12 +15,13 @@ import (
 )
 
 func main() {
+	ctx := ctx.New(context.Background())
+
 	err := godotenv.Load("config/.env")
 	if err != nil {
-		panic(fmt.Errorf("error loading .env file: %w", err))
+		_ = level.Warn(ctx.Log()).Log("message", "No .env file found or error loading .env file, proceeding without it")
 	}
 
-	ctx := ctx.New(context.Background())
 	store, err := dbstore.New(ctx)
 	if err != nil {
 		panic(fmt.Errorf("failed to create db: %w", err))
@@ -38,7 +39,7 @@ func main() {
 	if err != nil {
 		panic(fmt.Errorf("failed to get subreddits: %w", err))
 	}
-	level.Info(ctx.Log()).Log("subreddits", fmt.Sprintf("%v", subreddits))
+	_ = level.Info(ctx.Log()).Log("subreddits", fmt.Sprintf("%v", subreddits))
 
 	// Start Polling For Reddit Posts
 	for _, subreddit := range subreddits {
@@ -63,7 +64,7 @@ func main() {
 			case <-ctx.Done():
 				close(bot.PollerResponseChannel)
 				close(evaluate.EvaluateResponseChannel)
-				level.Info(ctx.Log()).Log("msg", "application terminated")
+				_ = level.Info(ctx.Log()).Log("msg", "application terminated")
 				return
 			}
 		}
