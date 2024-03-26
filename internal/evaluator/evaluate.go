@@ -1,82 +1,90 @@
 package evaluator
 
 import (
-	"github.com/meriley/reddit-spy/internal/database"
-	"github.com/pkg/errors"
+	"errors"
+	"fmt"
 	"strings"
-	"sync"
 
-	"github.com/meriley/reddit-spy/internal/context"
+	ctx "github.com/meriley/reddit-spy/internal/context"
+
+	"golang.org/x/sync/errgroup"
+
+	dbstore "github.com/meriley/reddit-spy/internal/dbstore"
 	redditJson "github.com/meriley/reddit-spy/internal/redditJSON"
 )
 
 type EvaluationInterface interface {
-	Evaluate(posts []*redditJson.JSONEntryDataChildrenData) error
+	Evaluate(posts []*redditJson.RedditPost) error
 }
 
 type RuleEvaluation struct {
-	Ctx                     context.Ctx
-	DB                      *database.DB
+	Store                   dbstore.Store
 	EvaluateResponseChannel chan *MatchingEvaluationResult
 }
 
 type MatchingEvaluationResult struct {
-	ServerID  string
-	ChannelID string
-	Post      *redditJson.JSONEntryDataChildrenData
+	ChannelID int
+	RuleID    int
+	PostID    int
+	Post      *redditJson.RedditPost
 }
 
-func (e *RuleEvaluation) Evaluate(posts []*redditJson.JSONEntryDataChildrenData, resultChannel chan *MatchingEvaluationResult) error {
-	var rulesDocument *database.RulesDocument
-	for _, post := range posts {
-		if rulesDocument == nil {
-			var err error
-			rulesDocument, err = e.DB.GetRulesDocument(post.Subreddit)
-			if err != nil {
-				return errors.Wrap(err, "failed to get rules document")
-			}
+func (e *RuleEvaluation) Evaluate(
+	ctx ctx.Ctx,
+	posts []*redditJson.RedditPost,
+	resultChannel chan *MatchingEvaluationResult,
+) error {
+	for _, p := range posts {
+		subredditID := p.Subreddit
+		subreddit, err := e.Store.GetSubredditByExternalID(ctx, subredditID)
+		if err != nil {
+			return fmt.Errorf("failed to get subreddit %s: %w", subredditID, err)
+		}
+		rules, err := e.Store.GetRules(ctx, subreddit.ID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch rules for %s: %w", subredditID, err)
 		}
 
-		for serverID, serverValues := range rulesDocument.Servers {
-			for channelID, channelValues := range serverValues.Channels {
-				var wg sync.WaitGroup
-				wg.Add(len(channelValues.Rules))
-				for _, rule := range channelValues.Rules {
-					sid := serverID
-					cid := channelID
-					p := post
-					r := rule
-					go func() {
-						defer wg.Done()
-						value, err := getValue(p, r)
-						if err != nil {
-							return
-						}
-
-						var result bool
-						if r.Exact {
-							result = evaluateExact(value, r.Target)
-						} else {
-							result = evaluatePartial(value, r.Target)
-						}
-
-						if result {
-							resultChannel <- &MatchingEvaluationResult{
-								ChannelID: cid,
-								ServerID:  sid,
-								Post:      p,
-							}
-						}
-					}()
+		eg, egCtx := errgroup.WithContext(ctx)
+		for _, r := range rules {
+			p := p
+			r := r
+			eg.Go(func() error {
+				value, err := getValue(p, r)
+				if err != nil {
+					return fmt.Errorf("failed to get value for post %s: %w", p.ID, err)
 				}
-				wg.Wait()
-			}
+
+				var result bool
+				if r.Exact {
+					result = evaluateExact(value, r.Target)
+				} else {
+					result = evaluatePartial(value, r.Target)
+				}
+
+				if result {
+					dbP, err := e.Store.InsertPost(egCtx, p.ID)
+					if err != nil {
+						return fmt.Errorf("failed to insert post to store: %w", err)
+					}
+					resultChannel <- &MatchingEvaluationResult{
+						ChannelID: r.DiscordChannelID,
+						RuleID:    r.ID,
+						PostID:    dbP.ID,
+						Post:      p,
+					}
+				}
+				return nil
+			})
+		}
+		if err := eg.Wait(); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func getValue(post *redditJson.JSONEntryDataChildrenData, rule *database.Rule) (string, error) {
+func getValue(post *redditJson.RedditPost, rule *dbstore.Rule) (string, error) {
 	switch rule.TargetId {
 	case "author":
 		return post.Author, nil
@@ -88,17 +96,16 @@ func getValue(post *redditJson.JSONEntryDataChildrenData, rule *database.Rule) (
 }
 
 func evaluateExact(value string, expected string) bool {
-	return strings.ToLower(value) == strings.ToLower(expected)
+	return strings.EqualFold(value, expected)
 }
 
 func evaluatePartial(value string, expected string) bool {
 	return strings.Contains(strings.ToLower(value), strings.ToLower(expected))
 }
 
-func NewRuleEvaluator(ctx context.Ctx, db *database.DB) *RuleEvaluation {
+func NewRuleEvaluator(store dbstore.Store) *RuleEvaluation {
 	return &RuleEvaluation{
-		Ctx:                     ctx,
-		DB:                      db,
+		Store:                   store,
 		EvaluateResponseChannel: make(chan *MatchingEvaluationResult, 10),
 	}
 }

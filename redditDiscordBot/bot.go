@@ -1,61 +1,74 @@
 package redditDiscordBot
 
 import (
+	"context"
 	"fmt"
-	"github.com/meriley/reddit-spy/internal/context"
-	"github.com/meriley/reddit-spy/internal/database"
-	"github.com/meriley/reddit-spy/internal/redditJSON"
 	"time"
 
-	"github.com/pkg/errors"
+	ctx "github.com/meriley/reddit-spy/internal/context"
+	dbstore "github.com/meriley/reddit-spy/internal/dbstore"
+	"github.com/meriley/reddit-spy/internal/redditJSON"
 )
 
 type RedditDiscordBot struct {
-	BotInterface
-	Ctx                   context.Ctx
-	DatabaseClient        *database.DB
-	Pollers               map[string]*redditJSON.Poller
-	PollerResponseChannel chan []*redditJSON.JSONEntryDataChildrenData
+	Ctx                   ctx.Ctx
+	Store                 dbstore.Store
+	Pollers               map[int]*redditJSON.Poller
+	PollerResponseChannel chan []*redditJSON.RedditPost
 }
 
 func (b *RedditDiscordBot) AddSubredditPoller(
-	subreddit string,
+	ctx ctx.Ctx,
+	subreddit *dbstore.Subreddit,
 ) *redditJSON.Poller {
-	if poller, found := b.Pollers[subreddit]; found {
+	if poller, found := b.Pollers[subreddit.ID]; found {
 		return poller
 	}
 	poller := redditJSON.NewPoller(
-		b.Ctx,
-		fmt.Sprintf("https://www.reddit.com/r/%s/.json", subreddit),
+		ctx,
+		fmt.Sprintf("https://www.reddit.com/r/%s/.json", subreddit.ExternalID),
 		30*time.Second,
 		5*time.Second,
 	)
+	b.Pollers[subreddit.ID] = poller
 	poller.Start(b.PollerResponseChannel)
 	return poller
 }
 
-func (b *RedditDiscordBot) InsertRule(
-	subreddit string,
+func (b *RedditDiscordBot) CreateRule(
+	ctx context.Context,
 	serverID string,
 	channelID string,
-	rule *database.Rule,
+	subredditID string,
+	rule dbstore.Rule,
 ) error {
-	if err := b.DatabaseClient.InsertRule(subreddit, serverID, channelID, rule); err != nil {
-		return errors.Wrap(err, "failed to insert rule")
+	s, err := b.Store.InsertDiscordServer(ctx, serverID)
+	if err != nil {
+		return fmt.Errorf("failed to insert discord server: %w", err)
 	}
-	b.AddSubredditPoller(subreddit)
+	c, err := b.Store.InsertDiscordChannel(ctx, channelID, s.ID)
+	if err != nil {
+		return fmt.Errorf("failed to insert discord server: %w", err)
+	}
+	sr, err := b.Store.InsertSubreddit(ctx, subredditID)
+	if err != nil {
+		return fmt.Errorf("failed to insert discord server: %w", err)
+	}
+	rule.DiscordServerID = s.ID
+	rule.DiscordChannelID = c.ID
+	rule.SubredditID = sr.ID
+	if _, err := b.Store.InsertRule(ctx, rule); err != nil {
+		return fmt.Errorf("failed to insert rule: %w", err)
+	}
+	b.AddSubredditPoller(b.Ctx, sr)
 	return nil
 }
 
-func New(ctx context.Ctx) (*RedditDiscordBot, error) {
-	dbClient, err := database.New(ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create database client")
-	}
+func New(ctx ctx.Ctx, store dbstore.Store) (*RedditDiscordBot, error) {
 	return &RedditDiscordBot{
 		Ctx:                   ctx,
-		DatabaseClient:        dbClient,
-		Pollers:               make(map[string]*redditJSON.Poller),
-		PollerResponseChannel: make(chan []*redditJSON.JSONEntryDataChildrenData, 10),
+		Store:                 store,
+		Pollers:               make(map[int]*redditJSON.Poller),
+		PollerResponseChannel: make(chan []*redditJSON.RedditPost, 10),
 	}, nil
 }

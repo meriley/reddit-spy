@@ -2,12 +2,12 @@ package redditJSON
 
 import (
 	"encoding/json"
-	"github.com/go-kit/log/level"
-	"github.com/meriley/reddit-spy/internal/context"
-	"github.com/pkg/errors"
-	"io"
+	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/go-kit/log/level"
+	ctx "github.com/meriley/reddit-spy/internal/context"
 )
 
 const (
@@ -23,14 +23,14 @@ type PollerInterface interface {
 
 type Poller struct {
 	PollerInterface
-	Context    context.Ctx
+	Context    ctx.Ctx
 	HttpClient *http.Client
 	Url        string
 	Timeout    time.Duration
 	Interval   time.Duration
 }
 
-func NewPoller(ctx context.Ctx, url string, interval time.Duration, timeout time.Duration) *Poller {
+func NewPoller(ctx ctx.Ctx, url string, interval time.Duration, timeout time.Duration) *Poller {
 	quit = make(chan struct{})
 	return &Poller{
 		Context:    ctx,
@@ -41,7 +41,7 @@ func NewPoller(ctx context.Ctx, url string, interval time.Duration, timeout time
 	}
 }
 
-func (r *Poller) Start(c chan []*JSONEntryDataChildrenData) {
+func (r *Poller) Start(c chan []*RedditPost) {
 	ticker := time.NewTicker(r.Interval)
 	go func() {
 		for {
@@ -49,7 +49,7 @@ func (r *Poller) Start(c chan []*JSONEntryDataChildrenData) {
 			case <-ticker.C:
 				feed, err := r.getJSONEntries(r.Url)
 				if err != nil {
-					level.Error(r.Context.Log()).Log("error", err.Error())
+					_ = level.Error(r.Context.Log()).Log("error", err.Error())
 				}
 				c <- feed
 			case <-quit:
@@ -65,7 +65,7 @@ func (r *Poller) Stop() {
 }
 
 type (
-	JSONEntryDataChildrenData struct {
+	RedditPost struct {
 		Author    string `json:"author"`
 		ID        string `json:"id"`
 		Permalink string `json:"permalink"`
@@ -76,7 +76,7 @@ type (
 		URL       string `json:"URL"`
 	}
 	JSONEntryDataChildren struct {
-		Data *JSONEntryDataChildrenData `json:"data"`
+		Data *RedditPost `json:"data"`
 	}
 	JSONEntryData struct {
 		Children []*JSONEntryDataChildren `json:"children"`
@@ -86,25 +86,20 @@ type (
 	}
 )
 
-func (r *Poller) getJSONEntries(url string) ([]*JSONEntryDataChildrenData, error) {
+func (r *Poller) getJSONEntries(url string) ([]*RedditPost, error) {
 	resp, err := r.HttpClient.Get(url)
 	if err != nil || resp.StatusCode != 200 {
-		return []*JSONEntryDataChildrenData{}, err
+		return nil, err
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			level.Error(r.Context.Log()).Log("error", err.Error())
-		}
-	}(resp.Body)
+	defer resp.Body.Close()
 
 	var entries JSONEntry
 	err = json.NewDecoder(resp.Body).Decode(&entries)
 	if err != nil {
-		return []*JSONEntryDataChildrenData{}, errors.Wrap(err, "failed to decode json")
+		return nil, fmt.Errorf("failed to decode json :%w", err)
 	}
 
-	posts := make([]*JSONEntryDataChildrenData, 0, MAX_PAGINATION)
+	posts := make([]*RedditPost, 0, MAX_PAGINATION)
 	for _, child := range entries.Data.Children {
 		posts = append(posts, child.Data)
 	}
