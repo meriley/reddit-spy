@@ -1,10 +1,11 @@
 package evaluator
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
+
+	ctx "github.com/meriley/reddit-spy/internal/context"
 
 	"golang.org/x/sync/errgroup"
 
@@ -29,7 +30,7 @@ type MatchingEvaluationResult struct {
 }
 
 func (e *RuleEvaluation) Evaluate(
-	ctx context.Context,
+	ctx ctx.Ctx,
 	posts []*redditJson.RedditPost,
 	resultChannel chan *MatchingEvaluationResult,
 ) error {

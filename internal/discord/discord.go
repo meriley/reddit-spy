@@ -68,7 +68,7 @@ func (c *Client) SendMessage(ctx context.Ctx, result *evaluator.MatchingEvaluati
 	if err != nil {
 		return fmt.Errorf("unable to get notification count: %w", err)
 	}
-	if count > 1 {
+	if count > 0 {
 		return nil
 	}
 	end := 1024

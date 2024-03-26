@@ -83,7 +83,7 @@ func (db *PGXStore) InsertDiscordServer(ctx context.Context, serverID string) (*
 	defer cancel()
 
 	var s DiscordServer
-	sql := `INSERT INTO discord_servers (server_id) VALUES ($1) ON CONFLICT (server_id) DO NOTHING RETURNING id, server_id`
+	sql := `INSERT INTO discord_servers (server_id) VALUES (lower($1)) ON CONFLICT (server_id) DO NOTHING RETURNING id, server_id`
 	if err := db.QueryRow(ctx, sql, serverID).Scan(&s.ID, &s.ExternalID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return db.GetDiscordServerByExternalID(ctx, serverID)
@@ -98,7 +98,7 @@ func (db *PGXStore) GetDiscordServerByExternalID(ctx context.Context, serverID s
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	sql := `SELECT id, server_id FROM discord_servers where server_id = $1`
+	sql := `SELECT id, server_id FROM discord_servers where server_id = lower($1)`
 
 	row := db.QueryRow(ctx, sql, serverID)
 	var ch DiscordServer
@@ -123,7 +123,7 @@ func (db *PGXStore) InsertDiscordChannel(ctx context.Context, channelID string, 
     	discord_channels (
     		channel_id, 
     	    server_id
-    	) VALUES ($1, $2) ON CONFLICT (channel_id) DO NOTHING RETURNING id, channel_id`
+    	) VALUES (lower($1), $2) ON CONFLICT (channel_id) DO NOTHING RETURNING id, channel_id`
 	if err := db.QueryRow(ctx, sql, channelID, serverID).Scan(&c.ID, &c.ExternalID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return db.GetDiscordChannelByExternalID(ctx, channelID)
@@ -153,7 +153,7 @@ func (db *PGXStore) GetDiscordChannelByExternalID(ctx context.Context, channelID
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	sql := `SELECT id, channel_id FROM discord_channels where channel_id = $1`
+	sql := `SELECT id, channel_id FROM discord_channels where channel_id = lower($1)`
 
 	row := db.QueryRow(ctx, sql, channelID)
 	var ch DiscordChannel
@@ -225,7 +225,7 @@ func (db *PGXStore) InsertPost(ctx context.Context, postID string) (*Post, error
 	defer cancel()
 
 	var p Post
-	sql := `INSERT INTO posts (post_id) VALUES ($1) ON CONFLICT (post_id) DO NOTHING RETURNING id, post_id`
+	sql := `INSERT INTO posts (post_id) VALUES (lower($1)) ON CONFLICT (post_id) DO NOTHING RETURNING id, post_id`
 	if err := db.QueryRow(ctx, sql, postID).Scan(&p.ID, &p.ExternalID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return db.GetPostByExternalID(ctx, postID)
@@ -240,7 +240,7 @@ func (db *PGXStore) GetPostByExternalID(ctx context.Context, postID string) (*Po
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	sql := `SELECT id, post_id FROM posts WHERE post_id = $1`
+	sql := `SELECT id, post_id FROM posts WHERE post_id = lower($1)`
 	var p Post
 	if err := db.QueryRow(ctx, sql, postID).Scan(&p.ID, &p.ExternalID); err != nil {
 		return nil, fmt.Errorf("failed to insert data: %w", err)
@@ -259,7 +259,7 @@ func (db *PGXStore) InsertSubreddit(ctx context.Context, subredditID string) (*S
 	defer cancel()
 
 	var s Subreddit
-	sql := `INSERT INTO subreddits (subreddit_id) VALUES ($1) ON CONFLICT (subreddit_id) DO NOTHING RETURNING id, subreddit_id`
+	sql := `INSERT INTO subreddits (subreddit_id) VALUES (lower($1)) ON CONFLICT (subreddit_id) DO NOTHING RETURNING id, subreddit_id`
 	if err := db.QueryRow(ctx, sql, subredditID).Scan(&s.ID, &s.ExternalID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return db.GetSubredditByExternalID(ctx, subredditID)
@@ -274,7 +274,7 @@ func (db *PGXStore) GetSubredditByExternalID(ctx context.Context, subredditID st
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	sql := `SELECT id, subreddit_id FROM subreddits where subreddit_id = $1`
+	sql := `SELECT id, subreddit_id FROM subreddits where subreddit_id = lower($1)`
 
 	row := db.QueryRow(ctx, sql, subredditID)
 	var sr Subreddit
@@ -329,7 +329,7 @@ func (db *PGXStore) InsertRule(ctx context.Context, rule Rule) (*Rule, error) {
 		   exact, 
 		   channel_id, 
 		   subreddit_id
-		) VALUES ($1, $2, $3, $4, $5) RETURNING id`
+		) VALUES (lower($1), lower($2), $3, $4, $5) RETURNING id`
 
 	if err := db.QueryRow(ctx, sql, rule.Target, rule.TargetId, rule.Exact, rule.DiscordChannelID, rule.SubredditID).Scan(&rule.ID); err != nil {
 		return nil, fmt.Errorf("failed to insert data: %w", err)
@@ -349,14 +349,14 @@ func (db *PGXStore) GetRules(ctx context.Context, subreddit int) ([]*Rule, error
 		    target, 
 		    target_id, 
 		    exact,
-		    ds.server_id,
-		    dc.channel_id, 
-		    sr.subreddit_id 
+		    ds.id,
+		    dc.id, 
+		    sr.id 
 		FROM rules r
-			JOIN subreddits sr ON r.subreddit_id = sr.subreddit_id
+			JOIN subreddits sr ON r.subreddit_id = sr.id
 			JOIN discord_channels dc on r.channel_id = dc.id
 			JOIN discord_servers ds on dc.server_id = ds.id
-		WHERE r.subreddit_id = $1
+		WHERE sr.id = $1
 	`
 
 	rows, err := db.Query(ctx, sql, subreddit)
