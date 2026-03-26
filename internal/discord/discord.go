@@ -74,15 +74,25 @@ func (c *Client) RegisterCommands() error {
 		c.helpCommandConfig(),
 	}
 
+	commandHandlers := make(map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate))
 	for _, cmdConfig := range commands {
 		_, err := c.Client.ApplicationCommandCreate(c.Client.State.Application.ID, "", cmdConfig.Command)
 		if err != nil {
-			return fmt.Errorf("failed to create application command: %w", err)
+			return fmt.Errorf("failed to create application command %q: %w", cmdConfig.Command.Name, err)
 		}
-		c.Client.AddHandler(cmdConfig.Handler)
+		commandHandlers[cmdConfig.Command.Name] = cmdConfig.Handler
 	}
 
-	c.Client.AddHandler(c.componentHandler)
+	c.Client.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		switch i.Type {
+		case discordgo.InteractionApplicationCommand:
+			if handler, ok := commandHandlers[i.ApplicationCommandData().Name]; ok {
+				handler(s, i)
+			}
+		case discordgo.InteractionMessageComponent:
+			c.componentHandler(s, i)
+		}
+	})
 
 	return nil
 }

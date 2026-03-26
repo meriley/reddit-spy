@@ -10,10 +10,6 @@ import (
 )
 
 func (c *Client) componentHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if i.Type != discordgo.InteractionMessageComponent {
-		return
-	}
-
 	customID := i.MessageComponentData().CustomID
 
 	if strings.HasPrefix(customID, "delete_rule:") {
