@@ -2,6 +2,7 @@
 
 VERSION := 2.0.8
 REGISTRY := merileyjr
+export GOTOOLCHAIN := local
 
 start:
 	go run .
