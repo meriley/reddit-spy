@@ -1,4 +1,4 @@
-FROM golang:1.22-alpine3.19 AS builder
+FROM golang:1.23-alpine3.20 AS builder
 WORKDIR /app
 
 COPY go.mod go.sum ./
@@ -9,7 +9,7 @@ COPY . .
 ARG APP_VERSION=dev
 RUN CGO_ENABLED=0 go build -ldflags="-X main.version=$APP_VERSION" -o reddit-spy
 
-FROM alpine:3.19
+FROM alpine:3.20
 WORKDIR /app
 
 RUN adduser -D user

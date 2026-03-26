@@ -87,24 +87,26 @@ func (c *Client) SendMessage(ctx context.Ctx, result *evaluator.MatchingEvaluati
 	}
 
 	message := &discordgo.MessageSend{
-		Embed: &discordgo.MessageEmbed{
-			URL:   result.Post.URL,
-			Type:  discordgo.EmbedTypeLink,
-			Title: result.Post.Title,
-			Author: &discordgo.MessageEmbedAuthor{
-				Name: result.Post.Author,
-			},
-			Fields: []*discordgo.MessageEmbedField{
-				{
-					Name:   "Summary",
-					Value:  substring,
-					Inline: true,
+		Embeds: []*discordgo.MessageEmbed{
+			{
+				URL:   result.Post.URL,
+				Type:  discordgo.EmbedTypeLink,
+				Title: result.Post.Title,
+				Author: &discordgo.MessageEmbedAuthor{
+					Name: result.Post.Author,
+				},
+				Fields: []*discordgo.MessageEmbedField{
+					{
+						Name:   "Summary",
+						Value:  substring,
+						Inline: true,
+					},
 				},
 			},
 		},
 	}
 	if u, err := url.ParseRequestURI(result.Post.Thumbnail); err == nil {
-		message.Embed.Thumbnail = &discordgo.MessageEmbedThumbnail{
+		message.Embeds[0].Thumbnail = &discordgo.MessageEmbedThumbnail{
 			URL: u.String(),
 		}
 	}

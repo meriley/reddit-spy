@@ -1,4 +1,4 @@
-.PHONY: start build lint test docker docker-build docker-tag docker-push
+.PHONY: start build lint test vuln docker docker-build docker-tag docker-push
 
 VERSION := 2.0.8
 REGISTRY := merileyjr
@@ -11,6 +11,10 @@ lint:
 
 test:
 	go test ./... -v -race
+
+vuln:
+	go install golang.org/x/vuln/cmd/govulncheck@latest
+	govulncheck ./...
 
 build:
 	go build -ldflags="-X main.version=$(VERSION)" -o ./dist/reddit-spy
