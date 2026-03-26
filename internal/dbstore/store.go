@@ -18,6 +18,8 @@ const (
 	EnvPostgresDatabase = "POSTGRES_DATABASE"
 	EnvPostgresUser     = "POSTGRES_USER"
 	EnvPostgresPassword = "POSTGRES_PASSWORD"
+
+	DefaultQueryTimeout = 5 * time.Second
 )
 
 type Store interface {
@@ -33,6 +35,9 @@ type Store interface {
 
 	GetDiscordChannel(ctx context.Context, channelID int) (*DiscordChannel, error)
 	GetRules(ctx context.Context, subreddit int) ([]*Rule, error)
+	GetRulesByChannel(ctx context.Context, channelExternalID string) ([]*RuleDetail, error)
+	GetRuleByID(ctx context.Context, ruleID int) (*RuleDetail, error)
+	DeleteRule(ctx context.Context, ruleID int) error
 	GetSubreddits(ctx context.Context) ([]*Subreddit, error)
 	GetNotificationCount(ctx context.Context, postID, channelID, ruleID int) (int, error)
 }
@@ -78,7 +83,7 @@ type DiscordServer struct {
 }
 
 func (db *PGXStore) InsertDiscordServer(parentCtx context.Context, serverID string) (*DiscordServer, error) {
-	queryCtx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
+	queryCtx, cancel := context.WithTimeout(parentCtx, DefaultQueryTimeout)
 	defer cancel()
 
 	var s DiscordServer
@@ -94,7 +99,7 @@ func (db *PGXStore) InsertDiscordServer(parentCtx context.Context, serverID stri
 }
 
 func (db *PGXStore) GetDiscordServerByExternalID(ctx context.Context, serverID string) (*DiscordServer, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, DefaultQueryTimeout)
 	defer cancel()
 
 	query := `SELECT id, server_id FROM discord_servers where server_id = lower($1)`
@@ -114,7 +119,7 @@ type DiscordChannel struct {
 }
 
 func (db *PGXStore) InsertDiscordChannel(parentCtx context.Context, channelID string, serverID int) (*DiscordChannel, error) {
-	queryCtx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
+	queryCtx, cancel := context.WithTimeout(parentCtx, DefaultQueryTimeout)
 	defer cancel()
 
 	var c DiscordChannel
@@ -134,7 +139,7 @@ func (db *PGXStore) InsertDiscordChannel(parentCtx context.Context, channelID st
 }
 
 func (db *PGXStore) GetDiscordChannel(ctx context.Context, channelID int) (*DiscordChannel, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, DefaultQueryTimeout)
 	defer cancel()
 
 	query := `SELECT id, channel_id FROM discord_channels where id = $1`
@@ -149,7 +154,7 @@ func (db *PGXStore) GetDiscordChannel(ctx context.Context, channelID int) (*Disc
 }
 
 func (db *PGXStore) GetDiscordChannelByExternalID(ctx context.Context, channelID string) (*DiscordChannel, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, DefaultQueryTimeout)
 	defer cancel()
 
 	query := `SELECT id, channel_id FROM discord_channels where channel_id = lower($1)`
@@ -171,7 +176,7 @@ type Notification struct {
 }
 
 func (db *PGXStore) InsertNotification(parentCtx context.Context, postID, channelID, ruleID int) (*Notification, error) {
-	queryCtx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
+	queryCtx, cancel := context.WithTimeout(parentCtx, DefaultQueryTimeout)
 	defer cancel()
 
 	var n Notification
@@ -187,7 +192,7 @@ func (db *PGXStore) InsertNotification(parentCtx context.Context, postID, channe
 }
 
 func (db *PGXStore) GetNotification(ctx context.Context, postID, channelID, ruleID int) (*Notification, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, DefaultQueryTimeout)
 	defer cancel()
 
 	var n Notification
@@ -200,7 +205,7 @@ func (db *PGXStore) GetNotification(ctx context.Context, postID, channelID, rule
 }
 
 func (db *PGXStore) GetNotificationCount(ctx context.Context, postID, channelID, ruleID int) (int, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, DefaultQueryTimeout)
 	defer cancel()
 
 	query := `SELECT count(1) FROM notifications WHERE post_id = $1 AND channel_id = $2 AND rule_id = $3`
@@ -220,7 +225,7 @@ type Post struct {
 }
 
 func (db *PGXStore) InsertPost(parentCtx context.Context, postID string) (*Post, error) {
-	queryCtx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
+	queryCtx, cancel := context.WithTimeout(parentCtx, DefaultQueryTimeout)
 	defer cancel()
 
 	var p Post
@@ -236,7 +241,7 @@ func (db *PGXStore) InsertPost(parentCtx context.Context, postID string) (*Post,
 }
 
 func (db *PGXStore) GetPostByExternalID(ctx context.Context, postID string) (*Post, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, DefaultQueryTimeout)
 	defer cancel()
 
 	query := `SELECT id, post_id FROM posts WHERE post_id = lower($1)`
@@ -254,7 +259,7 @@ type Subreddit struct {
 }
 
 func (db *PGXStore) InsertSubreddit(parentCtx context.Context, subredditID string) (*Subreddit, error) {
-	queryCtx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
+	queryCtx, cancel := context.WithTimeout(parentCtx, DefaultQueryTimeout)
 	defer cancel()
 
 	var s Subreddit
@@ -270,7 +275,7 @@ func (db *PGXStore) InsertSubreddit(parentCtx context.Context, subredditID strin
 }
 
 func (db *PGXStore) GetSubredditByExternalID(ctx context.Context, subredditID string) (*Subreddit, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, DefaultQueryTimeout)
 	defer cancel()
 
 	query := `SELECT id, subreddit_id FROM subreddits where subreddit_id = lower($1)`
@@ -285,7 +290,7 @@ func (db *PGXStore) GetSubredditByExternalID(ctx context.Context, subredditID st
 }
 
 func (db *PGXStore) GetSubreddits(ctx context.Context) ([]*Subreddit, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, DefaultQueryTimeout)
 	defer cancel()
 
 	query := `SELECT id, subreddit_id FROM subreddits`
@@ -322,7 +327,7 @@ type Rule struct {
 }
 
 func (db *PGXStore) InsertRule(ctx context.Context, rule Rule) (*Rule, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, DefaultQueryTimeout)
 	defer cancel()
 
 	query := `INSERT INTO
@@ -342,7 +347,7 @@ func (db *PGXStore) InsertRule(ctx context.Context, rule Rule) (*Rule, error) {
 }
 
 func (db *PGXStore) GetRules(ctx context.Context, subreddit int) ([]*Rule, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, DefaultQueryTimeout)
 	defer cancel()
 
 	query := `
@@ -388,4 +393,85 @@ func (db *PGXStore) GetRules(ctx context.Context, subreddit int) ([]*Rule, error
 	}
 
 	return rules, nil
+}
+
+type RuleDetail struct {
+	ID        int
+	Target    string
+	Exact     bool
+	TargetID  string
+	Subreddit string
+	ServerID  int
+}
+
+func (db *PGXStore) GetRulesByChannel(ctx context.Context, channelExternalID string) ([]*RuleDetail, error) {
+	ctx, cancel := context.WithTimeout(ctx, DefaultQueryTimeout)
+	defer cancel()
+
+	query := `
+		SELECT r.id, r.target, r.exact, r.target_id, sr.subreddit_id, ds.id
+		FROM rules r
+			JOIN subreddits sr ON r.subreddit_id = sr.id
+			JOIN discord_channels dc ON r.channel_id = dc.id
+			JOIN discord_servers ds ON dc.server_id = ds.id
+		WHERE dc.channel_id = lower($1)
+		ORDER BY r.id
+	`
+
+	rows, err := db.Query(ctx, query, channelExternalID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query rules by channel: %w", err)
+	}
+	defer rows.Close()
+
+	var rules []*RuleDetail
+	for rows.Next() {
+		var r RuleDetail
+		if err := rows.Scan(&r.ID, &r.Target, &r.Exact, &r.TargetID, &r.Subreddit, &r.ServerID); err != nil {
+			return nil, fmt.Errorf("failed to scan rule detail row: %w", err)
+		}
+		rules = append(rules, &r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed iterating rule detail rows: %w", err)
+	}
+
+	return rules, nil
+}
+
+func (db *PGXStore) GetRuleByID(ctx context.Context, ruleID int) (*RuleDetail, error) {
+	ctx, cancel := context.WithTimeout(ctx, DefaultQueryTimeout)
+	defer cancel()
+
+	query := `
+		SELECT r.id, r.target, r.exact, r.target_id, sr.subreddit_id, ds.id
+		FROM rules r
+			JOIN subreddits sr ON r.subreddit_id = sr.id
+			JOIN discord_channels dc ON r.channel_id = dc.id
+			JOIN discord_servers ds ON dc.server_id = ds.id
+		WHERE r.id = $1
+	`
+
+	var r RuleDetail
+	if err := db.QueryRow(ctx, query, ruleID).Scan(&r.ID, &r.Target, &r.Exact, &r.TargetID, &r.Subreddit, &r.ServerID); err != nil {
+		return nil, fmt.Errorf("failed to get rule %d: %w", ruleID, err)
+	}
+
+	return &r, nil
+}
+
+func (db *PGXStore) DeleteRule(ctx context.Context, ruleID int) error {
+	ctx, cancel := context.WithTimeout(ctx, DefaultQueryTimeout)
+	defer cancel()
+
+	query := `DELETE FROM rules WHERE id = $1`
+	tag, err := db.Exec(ctx, query, ruleID)
+	if err != nil {
+		return fmt.Errorf("failed to delete rule %d: %w", ruleID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("rule %d not found", ruleID)
+	}
+
+	return nil
 }

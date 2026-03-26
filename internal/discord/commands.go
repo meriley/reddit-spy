@@ -2,6 +2,7 @@ package discord
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
@@ -9,6 +10,8 @@ import (
 
 	database "github.com/meriley/reddit-spy/internal/dbstore"
 )
+
+var subredditPattern = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 
 func (c *Client) addSubredditListenerCommandConfig() CommandConfig {
 	return CommandConfig{
@@ -97,6 +100,19 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 			)
 		}
 	}
+	if subredditID == "" || !subredditPattern.MatchString(subredditID) {
+		c.respondWithError(s, i, "Invalid subreddit name. Use only letters, numbers, and underscores.")
+		return
+	}
+	if len(subredditID) > 21 {
+		c.respondWithError(s, i, "Subreddit name is too long (max 21 characters).")
+		return
+	}
+	if rule.Target == "" {
+		c.respondWithError(s, i, "Match value cannot be empty.")
+		return
+	}
+
 	if err := c.Bot.CreateRule(c.Ctx, i.GuildID, i.ChannelID, subredditID, rule); err != nil {
 		if irErr := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,

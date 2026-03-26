@@ -10,6 +10,12 @@ import (
 	"github.com/meriley/reddit-spy/internal/redditJSON"
 )
 
+const (
+	DefaultPollInterval = 30 * time.Second
+	DefaultHTTPTimeout  = 5 * time.Second
+	PollerChannelBuffer = 10
+)
+
 type RedditDiscordBot struct {
 	ctx                   ctx.Ctx
 	Store                 dbstore.Store
@@ -31,8 +37,8 @@ func (b *RedditDiscordBot) AddSubredditPoller(
 	poller := redditJSON.NewPoller(
 		ctx,
 		fmt.Sprintf("https://www.reddit.com/r/%s/.json", subreddit.ExternalID),
-		30*time.Second,
-		5*time.Second,
+		DefaultPollInterval,
+		DefaultHTTPTimeout,
 	)
 	b.pollers[subreddit.ID] = poller
 	poller.Start(b.PollerResponseChannel)
@@ -83,6 +89,6 @@ func New(ctx ctx.Ctx, store dbstore.Store) (*RedditDiscordBot, error) {
 		ctx:                   ctx,
 		Store:                 store,
 		pollers:               make(map[int]*redditJSON.Poller),
-		PollerResponseChannel: make(chan []*redditJSON.RedditPost, 10),
+		PollerResponseChannel: make(chan []*redditJSON.RedditPost, PollerChannelBuffer),
 	}, nil
 }

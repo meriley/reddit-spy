@@ -59,14 +59,17 @@ func (r *Poller) Stop() {
 
 type (
 	RedditPost struct {
-		Author    string `json:"author"`
-		ID        string `json:"id"`
-		Permalink string `json:"permalink"`
-		Selftext  string `json:"selftext"`
-		Subreddit string `json:"subreddit"`
-		Thumbnail string `json:"thumbnail"`
-		Title     string `json:"title"`
-		URL       string `json:"URL"`
+		Author      string  `json:"author"`
+		ID          string  `json:"id"`
+		Permalink   string  `json:"permalink"`
+		Selftext    string  `json:"selftext"`
+		Subreddit   string  `json:"subreddit"`
+		Thumbnail   string  `json:"thumbnail"`
+		Title       string  `json:"title"`
+		URL         string  `json:"URL"`
+		Score       int     `json:"score"`
+		NumComments int     `json:"num_comments"`
+		CreatedUTC  float64 `json:"created_utc"`
 	}
 	JSONEntryDataChildren struct {
 		Data *RedditPost `json:"data"`

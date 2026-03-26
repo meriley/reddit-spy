@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"time"
 	"unicode/utf8"
 
 	"github.com/bwmarrin/discordgo"
@@ -12,6 +13,8 @@ import (
 	"github.com/meriley/reddit-spy/internal/evaluator"
 	"github.com/meriley/reddit-spy/redditDiscordBot"
 )
+
+const embedColorReddit = 0xFF4500
 
 type Client struct {
 	Ctx    context.Ctx
@@ -30,6 +33,10 @@ func New(ctx context.Ctx, bot *redditDiscordBot.RedditDiscordBot) (*Client, erro
 		return nil, fmt.Errorf("failed to create discord session: %w", err)
 	}
 	dg.Identify.Intents = discordgo.IntentsGuilds
+	dg.ShouldReconnectOnError = true
+	dg.ShouldRetryOnRateLimit = true
+	dg.StateEnabled = true
+	dg.MaxRestRetries = 3
 	err = dg.Open()
 	if err != nil {
 		return nil, fmt.Errorf("error opening discord session: %w", err)
@@ -59,6 +66,9 @@ type CommandConfig struct {
 func (c *Client) RegisterCommands() error {
 	commands := []CommandConfig{
 		c.addSubredditListenerCommandConfig(),
+		c.listRulesCommandConfig(),
+		c.deleteRuleCommandConfig(),
+		c.helpCommandConfig(),
 	}
 
 	for _, cmdConfig := range commands {
@@ -86,29 +96,54 @@ func (c *Client) SendMessage(ctx context.Ctx, result *evaluator.MatchingEvaluati
 		substring = "(no text)"
 	}
 
-	message := &discordgo.MessageSend{
-		Embeds: []*discordgo.MessageEmbed{
+	matchType := "partial"
+	if result.Rule != nil && result.Rule.Exact {
+		matchType = "exact"
+	}
+	footerText := fmt.Sprintf("Rule #%d | %s %s match", result.RuleID, result.Rule.TargetID, matchType)
+
+	embed := &discordgo.MessageEmbed{
+		URL:   result.Post.URL,
+		Type:  discordgo.EmbedTypeLink,
+		Title: result.Post.Title,
+		Color: embedColorReddit,
+		Author: &discordgo.MessageEmbedAuthor{
+			Name: fmt.Sprintf("u/%s in r/%s", result.Post.Author, result.Post.Subreddit),
+		},
+		Fields: []*discordgo.MessageEmbedField{
 			{
-				URL:   result.Post.URL,
-				Type:  discordgo.EmbedTypeLink,
-				Title: result.Post.Title,
-				Author: &discordgo.MessageEmbedAuthor{
-					Name: result.Post.Author,
-				},
-				Fields: []*discordgo.MessageEmbedField{
-					{
-						Name:   "Summary",
-						Value:  substring,
-						Inline: true,
-					},
-				},
+				Name:   "Summary",
+				Value:  substring,
+				Inline: false,
+			},
+			{
+				Name:   "Score",
+				Value:  fmt.Sprintf("%d", result.Post.Score),
+				Inline: true,
+			},
+			{
+				Name:   "Comments",
+				Value:  fmt.Sprintf("%d", result.Post.NumComments),
+				Inline: true,
 			},
 		},
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: footerText,
+		},
 	}
+
+	if result.Post.CreatedUTC > 0 {
+		embed.Timestamp = time.Unix(int64(result.Post.CreatedUTC), 0).UTC().Format(time.RFC3339)
+	}
+
 	if u, err := url.ParseRequestURI(result.Post.Thumbnail); err == nil {
-		message.Embeds[0].Thumbnail = &discordgo.MessageEmbedThumbnail{
+		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{
 			URL: u.String(),
 		}
+	}
+
+	message := &discordgo.MessageSend{
+		Embeds: []*discordgo.MessageEmbed{embed},
 	}
 
 	ch, err := c.Bot.Store.GetDiscordChannel(ctx, result.ChannelID)

@@ -13,6 +13,8 @@ import (
 	redditJson "github.com/meriley/reddit-spy/internal/redditJSON"
 )
 
+const EvalChannelBuffer = 10
+
 type RuleEvaluation struct {
 	store                   dbstore.Store
 	EvaluateResponseChannel chan *MatchingEvaluationResult
@@ -23,6 +25,7 @@ type MatchingEvaluationResult struct {
 	RuleID    int
 	PostID    int
 	Post      *redditJson.RedditPost
+	Rule      *dbstore.Rule
 }
 
 func (e *RuleEvaluation) Evaluate(
@@ -85,6 +88,7 @@ func (e *RuleEvaluation) Evaluate(
 						RuleID:    r.ID,
 						PostID:    dbP.ID,
 						Post:      p,
+						Rule:      r,
 					}:
 					case <-egCtx.Done():
 						return egCtx.Err()
@@ -122,6 +126,6 @@ func evaluatePartial(value string, expected string) bool {
 func NewRuleEvaluator(store dbstore.Store) *RuleEvaluation {
 	return &RuleEvaluation{
 		store:                   store,
-		EvaluateResponseChannel: make(chan *MatchingEvaluationResult, 10),
+		EvaluateResponseChannel: make(chan *MatchingEvaluationResult, EvalChannelBuffer),
 	}
 }
