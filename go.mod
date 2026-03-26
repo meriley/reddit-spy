@@ -2,7 +2,7 @@ module github.com/meriley/reddit-spy
 
 go 1.23.0
 
-toolchain go1.23.10
+toolchain go1.24.13
 
 require (
 	github.com/bwmarrin/discordgo v0.29.0
