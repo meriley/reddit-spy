@@ -52,15 +52,34 @@ func (c *Client) listRulesHandler(s *discordgo.Session, i *discordgo.Interaction
 		Description: strings.Join(lines, "\n"),
 		Color:       embedColorReddit,
 		Footer: &discordgo.MessageEmbedFooter{
-			Text: "Use /delete_rule <id> to remove a rule",
+			Text: "Click a button below to delete a rule",
 		},
+	}
+
+	// Build action rows with delete buttons (max 5 per row, max 25 rules with buttons)
+	var components []discordgo.MessageComponent
+	var buttons []discordgo.MessageComponent
+	for idx, r := range rules {
+		if idx >= 25 {
+			break
+		}
+		buttons = append(buttons, discordgo.Button{
+			Label:    fmt.Sprintf("Delete #%d", r.ID),
+			Style:    discordgo.DangerButton,
+			CustomID: fmt.Sprintf("delete_rule:%d", r.ID),
+		})
+		if len(buttons) == 5 || idx == len(rules)-1 || idx == 24 {
+			components = append(components, discordgo.ActionsRow{Components: buttons})
+			buttons = nil
+		}
 	}
 
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
-			Flags:  discordgo.MessageFlagsEphemeral,
-			Embeds: []*discordgo.MessageEmbed{embed},
+			Flags:      discordgo.MessageFlagsEphemeral,
+			Embeds:     []*discordgo.MessageEmbed{embed},
+			Components: components,
 		},
 	}); err != nil {
 		_ = level.Error(c.Ctx.Log()).Log("error", "failed to send list rules response", "err", err)

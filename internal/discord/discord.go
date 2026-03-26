@@ -82,6 +82,8 @@ func (c *Client) RegisterCommands() error {
 		c.Client.AddHandler(cmdConfig.Handler)
 	}
 
+	c.Client.AddHandler(c.componentHandler)
+
 	return nil
 }
 
