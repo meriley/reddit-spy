@@ -26,6 +26,11 @@ func (c *Client) deleteRuleCommandConfig() CommandConfig {
 }
 
 func (c *Client) deleteRuleHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if !c.hasManageChannels(s, i) {
+		c.respondWithError(s, i, "You need the **Manage Channels** permission to delete rules.")
+		return
+	}
+
 	data := i.ApplicationCommandData()
 	if len(data.Options) == 0 {
 		c.respondWithError(s, i, "rule_id is required")

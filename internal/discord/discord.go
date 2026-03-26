@@ -68,6 +68,9 @@ func (c *Client) RegisterCommands() error {
 		c.addSubredditListenerCommandConfig(),
 		c.listRulesCommandConfig(),
 		c.deleteRuleCommandConfig(),
+		c.editRuleCommandConfig(),
+		c.pingCommandConfig(),
+		c.statusCommandConfig(),
 		c.helpCommandConfig(),
 	}
 

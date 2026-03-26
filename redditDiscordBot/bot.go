@@ -2,6 +2,7 @@ package redditDiscordBot
 
 import (
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -19,9 +20,16 @@ const (
 type RedditDiscordBot struct {
 	ctx                   ctx.Ctx
 	Store                 dbstore.Store
+	StartedAt             time.Time
 	mu                    sync.RWMutex
 	pollers               map[int]*redditJSON.Poller
 	PollerResponseChannel chan []*redditJSON.RedditPost
+}
+
+func (b *RedditDiscordBot) PollerCount() int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return len(b.pollers)
 }
 
 func (b *RedditDiscordBot) AddSubredditPoller(
@@ -84,10 +92,29 @@ func (b *RedditDiscordBot) CreateRule(
 	return nil
 }
 
+func ValidateSubredditExists(subreddit string) bool {
+	if subreddit == "" {
+		return false
+	}
+	client := &http.Client{Timeout: DefaultHTTPTimeout}
+	req, err := http.NewRequest(http.MethodHead, fmt.Sprintf("https://www.reddit.com/r/%s/.json", subreddit), nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("User-Agent", "reddit-spy/2.0 (github.com/meriley/reddit-spy)")
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
 func New(ctx ctx.Ctx, store dbstore.Store) (*RedditDiscordBot, error) {
 	return &RedditDiscordBot{
 		ctx:                   ctx,
 		Store:                 store,
+		StartedAt:             time.Now(),
 		pollers:               make(map[int]*redditJSON.Poller),
 		PollerResponseChannel: make(chan []*redditJSON.RedditPost, PollerChannelBuffer),
 	}, nil

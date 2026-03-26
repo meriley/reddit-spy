@@ -9,6 +9,7 @@ import (
 	"github.com/go-kit/log/level"
 
 	database "github.com/meriley/reddit-spy/internal/dbstore"
+	"github.com/meriley/reddit-spy/redditDiscordBot"
 )
 
 var subredditPattern = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
@@ -58,6 +59,11 @@ func (c *Client) subredditListenerOptions() []*discordgo.ApplicationCommandOptio
 }
 
 func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if !c.hasManageChannels(s, i) {
+		c.respondWithError(s, i, "You need the **Manage Channels** permission to create rules.")
+		return
+	}
+
 	data := i.ApplicationCommandData()
 	var (
 		rule        database.Rule
@@ -113,6 +119,11 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 		return
 	}
 
+	if !redditDiscordBot.ValidateSubredditExists(subredditID) {
+		c.respondWithError(s, i, fmt.Sprintf("Subreddit r/%s does not exist or is not accessible.", subredditID))
+		return
+	}
+
 	if err := c.Bot.CreateRule(c.Ctx, i.GuildID, i.ChannelID, subredditID, rule); err != nil {
 		if irErr := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -153,6 +164,14 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 				"rule", fmt.Sprintf("%v", rule),
 			)
 	}
+}
+
+func (c *Client) hasManageChannels(s *discordgo.Session, i *discordgo.InteractionCreate) bool {
+	if i.Member == nil {
+		return false
+	}
+	perms := i.Member.Permissions
+	return perms&discordgo.PermissionManageChannels != 0 || perms&discordgo.PermissionAdministrator != 0
 }
 
 func (c *Client) respondWithError(s *discordgo.Session, i *discordgo.InteractionCreate, msg string) {

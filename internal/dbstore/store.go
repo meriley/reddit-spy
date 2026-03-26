@@ -38,6 +38,7 @@ type Store interface {
 	GetRulesByChannel(ctx context.Context, channelExternalID string) ([]*RuleDetail, error)
 	GetRuleByID(ctx context.Context, ruleID int) (*RuleDetail, error)
 	DeleteRule(ctx context.Context, ruleID int) error
+	UpdateRule(ctx context.Context, ruleID int, target string, exact bool) error
 	GetSubreddits(ctx context.Context) ([]*Subreddit, error)
 	GetNotificationCount(ctx context.Context, postID, channelID, ruleID int) (int, error)
 }
@@ -468,6 +469,22 @@ func (db *PGXStore) DeleteRule(ctx context.Context, ruleID int) error {
 	tag, err := db.Exec(ctx, query, ruleID)
 	if err != nil {
 		return fmt.Errorf("failed to delete rule %d: %w", ruleID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("rule %d not found", ruleID)
+	}
+
+	return nil
+}
+
+func (db *PGXStore) UpdateRule(ctx context.Context, ruleID int, target string, exact bool) error {
+	ctx, cancel := context.WithTimeout(ctx, DefaultQueryTimeout)
+	defer cancel()
+
+	query := `UPDATE rules SET target = lower($1), exact = $2 WHERE id = $3`
+	tag, err := db.Exec(ctx, query, target, exact, ruleID)
+	if err != nil {
+		return fmt.Errorf("failed to update rule %d: %w", ruleID, err)
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("rule %d not found", ruleID)

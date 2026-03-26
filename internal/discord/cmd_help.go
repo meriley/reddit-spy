@@ -23,15 +23,27 @@ func (c *Client) helpHandler(s *discordgo.Session, i *discordgo.InteractionCreat
 		Fields: []*discordgo.MessageEmbedField{
 			{
 				Name:  "/add_subreddit_listener",
-				Value: "Create a rule to watch a subreddit for posts matching a keyword by author or title.",
+				Value: "Create a rule to watch a subreddit for posts matching a keyword by author or title. Requires **Manage Channels**.",
 			},
 			{
 				Name:  "/list_rules",
 				Value: "List all active rules in the current channel.",
 			},
 			{
+				Name:  "/edit_rule",
+				Value: "Edit a rule's match value or exact/partial mode. Requires **Manage Channels**.",
+			},
+			{
 				Name:  "/delete_rule",
-				Value: "Delete a rule by its ID (use /list_rules to find IDs).",
+				Value: "Delete a rule by its ID (use /list_rules to find IDs). Requires **Manage Channels**.",
+			},
+			{
+				Name:  "/ping",
+				Value: "Check bot latency.",
+			},
+			{
+				Name:  "/status",
+				Value: "Show bot uptime, active pollers, and health info.",
 			},
 			{
 				Name:  "/help",
