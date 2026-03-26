@@ -1,24 +1,22 @@
-# Builder stage with specific Go version
-FROM golang:1.20-alpine3.16 as builder
+FROM golang:1.22-alpine3.19 AS builder
 WORKDIR /app
 
-# Leverage caching of modules
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
 
-ARG APP_VERSION=1.0.0
+ARG APP_VERSION=dev
 RUN CGO_ENABLED=0 go build -ldflags="-X main.version=$APP_VERSION" -o reddit-spy
 
-# Runner stage
-FROM alpine:latest
+FROM alpine:3.19
 WORKDIR /app
 
-# Add a non-root user and switch to it
 RUN adduser -D user
 USER user
 
 COPY --from=builder /app/reddit-spy ./reddit-spy
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD pgrep reddit-spy || exit 1
 
 ENTRYPOINT ["/app/reddit-spy"]

@@ -13,12 +13,8 @@ import (
 	redditJson "github.com/meriley/reddit-spy/internal/redditJSON"
 )
 
-type EvaluationInterface interface {
-	Evaluate(posts []*redditJson.RedditPost) error
-}
-
 type RuleEvaluation struct {
-	Store                   dbstore.Store
+	store                   dbstore.Store
 	EvaluateResponseChannel chan *MatchingEvaluationResult
 }
 
@@ -34,15 +30,31 @@ func (e *RuleEvaluation) Evaluate(
 	posts []*redditJson.RedditPost,
 	resultChannel chan *MatchingEvaluationResult,
 ) error {
+	// Deduplicate subreddit lookups: all posts in a batch share the same subreddit
+	subredditCache := make(map[string]*dbstore.Subreddit)
+	rulesCache := make(map[int][]*dbstore.Rule)
+
 	for _, p := range posts {
-		subredditID := p.Subreddit
-		subreddit, err := e.Store.GetSubredditByExternalID(ctx, subredditID)
-		if err != nil {
-			return fmt.Errorf("failed to get subreddit %s: %w", subredditID, err)
+		subredditName := p.Subreddit
+
+		subreddit, ok := subredditCache[subredditName]
+		if !ok {
+			var err error
+			subreddit, err = e.store.GetSubredditByExternalID(ctx, subredditName)
+			if err != nil {
+				return fmt.Errorf("failed to get subreddit %s: %w", subredditName, err)
+			}
+			subredditCache[subredditName] = subreddit
 		}
-		rules, err := e.Store.GetRules(ctx, subreddit.ID)
-		if err != nil {
-			return fmt.Errorf("failed to fetch rules for %s: %w", subredditID, err)
+
+		rules, ok := rulesCache[subreddit.ID]
+		if !ok {
+			var err error
+			rules, err = e.store.GetRules(ctx, subreddit.ID)
+			if err != nil {
+				return fmt.Errorf("failed to fetch rules for %s: %w", subredditName, err)
+			}
+			rulesCache[subreddit.ID] = rules
 		}
 
 		eg, egCtx := errgroup.WithContext(ctx)
@@ -63,15 +75,19 @@ func (e *RuleEvaluation) Evaluate(
 				}
 
 				if result {
-					dbP, err := e.Store.InsertPost(egCtx, p.ID)
+					dbP, err := e.store.InsertPost(egCtx, p.ID)
 					if err != nil {
 						return fmt.Errorf("failed to insert post to store: %w", err)
 					}
-					resultChannel <- &MatchingEvaluationResult{
+					select {
+					case resultChannel <- &MatchingEvaluationResult{
 						ChannelID: r.DiscordChannelID,
 						RuleID:    r.ID,
 						PostID:    dbP.ID,
 						Post:      p,
+					}:
+					case <-egCtx.Done():
+						return egCtx.Err()
 					}
 				}
 				return nil
@@ -85,7 +101,7 @@ func (e *RuleEvaluation) Evaluate(
 }
 
 func getValue(post *redditJson.RedditPost, rule *dbstore.Rule) (string, error) {
-	switch rule.TargetId {
+	switch rule.TargetID {
 	case "author":
 		return post.Author, nil
 	case "title":
@@ -105,7 +121,7 @@ func evaluatePartial(value string, expected string) bool {
 
 func NewRuleEvaluator(store dbstore.Store) *RuleEvaluation {
 	return &RuleEvaluation{
-		Store:                   store,
+		store:                   store,
 		EvaluateResponseChannel: make(chan *MatchingEvaluationResult, 10),
 	}
 }

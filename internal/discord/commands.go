@@ -64,13 +64,33 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 	for _, option := range data.Options {
 		switch option.Name {
 		case "subreddit":
-			subredditID = strings.ToLower(option.Value.(string))
+			v, ok := option.Value.(string)
+			if !ok {
+				c.respondWithError(s, i, "invalid subreddit value")
+				return
+			}
+			subredditID = strings.ToLower(v)
 		case "match_on":
-			rule.TargetId = strings.ToLower(option.Value.(string))
+			v, ok := option.Value.(string)
+			if !ok {
+				c.respondWithError(s, i, "invalid match_on value")
+				return
+			}
+			rule.TargetID = strings.ToLower(v)
 		case "value":
-			rule.Target = strings.ToLower(option.Value.(string))
+			v, ok := option.Value.(string)
+			if !ok {
+				c.respondWithError(s, i, "invalid value")
+				return
+			}
+			rule.Target = strings.ToLower(v)
 		case "exact":
-			rule.Exact = option.Value.(bool)
+			v, ok := option.Value.(bool)
+			if !ok {
+				c.respondWithError(s, i, "invalid exact value")
+				return
+			}
+			rule.Exact = v
 		default:
 			_ = level.Error(c.Ctx.Log()).Log("error", "unexpected key",
 				"key", option.Name,
@@ -117,4 +137,15 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 				"rule", fmt.Sprintf("%v", rule),
 			)
 	}
+}
+
+func (c *Client) respondWithError(s *discordgo.Session, i *discordgo.InteractionCreate, msg string) {
+	_ = level.Error(c.Ctx.Log()).Log("error", msg)
+	_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Flags:   discordgo.MessageFlagsEphemeral,
+			Content: msg,
+		},
+	})
 }

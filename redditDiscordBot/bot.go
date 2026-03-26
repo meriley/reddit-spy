@@ -1,8 +1,8 @@
 package redditDiscordBot
 
 import (
-	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	ctx "github.com/meriley/reddit-spy/internal/context"
@@ -11,9 +11,10 @@ import (
 )
 
 type RedditDiscordBot struct {
-	Ctx                   ctx.Ctx
+	ctx                   ctx.Ctx
 	Store                 dbstore.Store
-	Pollers               map[int]*redditJSON.Poller
+	mu                    sync.RWMutex
+	pollers               map[int]*redditJSON.Poller
 	PollerResponseChannel chan []*redditJSON.RedditPost
 }
 
@@ -21,7 +22,10 @@ func (b *RedditDiscordBot) AddSubredditPoller(
 	ctx ctx.Ctx,
 	subreddit *dbstore.Subreddit,
 ) *redditJSON.Poller {
-	if poller, found := b.Pollers[subreddit.ID]; found {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if poller, found := b.pollers[subreddit.ID]; found {
 		return poller
 	}
 	poller := redditJSON.NewPoller(
@@ -30,13 +34,23 @@ func (b *RedditDiscordBot) AddSubredditPoller(
 		30*time.Second,
 		5*time.Second,
 	)
-	b.Pollers[subreddit.ID] = poller
+	b.pollers[subreddit.ID] = poller
 	poller.Start(b.PollerResponseChannel)
 	return poller
 }
 
+func (b *RedditDiscordBot) Stop() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	for id, poller := range b.pollers {
+		poller.Stop()
+		delete(b.pollers, id)
+	}
+}
+
 func (b *RedditDiscordBot) CreateRule(
-	ctx context.Context,
+	ctx ctx.Ctx,
 	serverID string,
 	channelID string,
 	subredditID string,
@@ -48,11 +62,11 @@ func (b *RedditDiscordBot) CreateRule(
 	}
 	c, err := b.Store.InsertDiscordChannel(ctx, channelID, s.ID)
 	if err != nil {
-		return fmt.Errorf("failed to insert discord server: %w", err)
+		return fmt.Errorf("failed to insert discord channel: %w", err)
 	}
 	sr, err := b.Store.InsertSubreddit(ctx, subredditID)
 	if err != nil {
-		return fmt.Errorf("failed to insert discord server: %w", err)
+		return fmt.Errorf("failed to insert subreddit: %w", err)
 	}
 	rule.DiscordServerID = s.ID
 	rule.DiscordChannelID = c.ID
@@ -60,15 +74,15 @@ func (b *RedditDiscordBot) CreateRule(
 	if _, err := b.Store.InsertRule(ctx, rule); err != nil {
 		return fmt.Errorf("failed to insert rule: %w", err)
 	}
-	b.AddSubredditPoller(b.Ctx, sr)
+	b.AddSubredditPoller(b.ctx, sr)
 	return nil
 }
 
 func New(ctx ctx.Ctx, store dbstore.Store) (*RedditDiscordBot, error) {
 	return &RedditDiscordBot{
-		Ctx:                   ctx,
+		ctx:                   ctx,
 		Store:                 store,
-		Pollers:               make(map[int]*redditJSON.Poller),
+		pollers:               make(map[int]*redditJSON.Poller),
 		PollerResponseChannel: make(chan []*redditJSON.RedditPost, 10),
 	}, nil
 }

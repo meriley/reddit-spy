@@ -10,49 +10,42 @@ import (
 	ctx "github.com/meriley/reddit-spy/internal/context"
 )
 
-const (
-	MAX_PAGINATION = 102
-)
-
-var quit chan struct{}
-
 type PollerInterface interface {
-	Start(c chan *JSONEntry)
+	Start(c chan []*RedditPost)
 	Stop()
 }
 
 type Poller struct {
-	PollerInterface
-	Context    ctx.Ctx
-	HttpClient *http.Client
-	Url        string
-	Timeout    time.Duration
-	Interval   time.Duration
+	context    ctx.Ctx
+	httpClient *http.Client
+	url        string
+	interval   time.Duration
+	quit       chan struct{}
 }
 
 func NewPoller(ctx ctx.Ctx, url string, interval time.Duration, timeout time.Duration) *Poller {
-	quit = make(chan struct{})
 	return &Poller{
-		Context:    ctx,
-		Url:        url,
-		HttpClient: &http.Client{Timeout: timeout},
-		Interval:   interval,
-		Timeout:    timeout,
+		context:    ctx,
+		url:        url,
+		httpClient: &http.Client{Timeout: timeout},
+		interval:   interval,
+		quit:       make(chan struct{}),
 	}
 }
 
 func (r *Poller) Start(c chan []*RedditPost) {
-	ticker := time.NewTicker(r.Interval)
+	ticker := time.NewTicker(r.interval)
 	go func() {
 		for {
 			select {
 			case <-ticker.C:
-				feed, err := r.getJSONEntries(r.Url)
+				feed, err := r.getJSONEntries(r.url)
 				if err != nil {
-					_ = level.Error(r.Context.Log()).Log("error", err.Error())
+					_ = level.Error(r.context.Log()).Log("error", err.Error())
+					continue
 				}
 				c <- feed
-			case <-quit:
+			case <-r.quit:
 				ticker.Stop()
 				return
 			}
@@ -61,7 +54,7 @@ func (r *Poller) Start(c chan []*RedditPost) {
 }
 
 func (r *Poller) Stop() {
-	close(quit)
+	close(r.quit)
 }
 
 type (
@@ -87,19 +80,28 @@ type (
 )
 
 func (r *Poller) getJSONEntries(url string) ([]*RedditPost, error) {
-	resp, err := r.HttpClient.Get(url)
-	if err != nil || resp.StatusCode != 200 {
-		return nil, err
+	req, err := http.NewRequestWithContext(r.context, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build request: %w", err)
+	}
+	req.Header.Set("User-Agent", "reddit-spy/2.0 (github.com/meriley/reddit-spy)")
+
+	resp, err := r.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	var entries JSONEntry
-	err = json.NewDecoder(resp.Body).Decode(&entries)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode json :%w", err)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected HTTP status %d from %s", resp.StatusCode, url)
 	}
 
-	posts := make([]*RedditPost, 0, MAX_PAGINATION)
+	var entries JSONEntry
+	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+		return nil, fmt.Errorf("failed to decode json: %w", err)
+	}
+
+	posts := make([]*RedditPost, 0, len(entries.Data.Children))
 	for _, child := range entries.Data.Children {
 		posts = append(posts, child.Data)
 	}

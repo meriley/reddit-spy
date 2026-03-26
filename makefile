@@ -1,4 +1,4 @@
-.PHONY: start build lint docker docker-build docker-tag docker-push
+.PHONY: start build lint test docker docker-build docker-tag docker-push
 
 VERSION := 2.0.8
 REGISTRY := merileyjr
@@ -9,8 +9,11 @@ start:
 lint:
 	golangci-lint run --verbose
 
+test:
+	go test ./... -v -race
+
 build:
-	go build -o ./dist/reddit-spy
+	go build -ldflags="-X main.version=$(VERSION)" -o ./dist/reddit-spy
 
 docker: docker-build docker-tag docker-push
 

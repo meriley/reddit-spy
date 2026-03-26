@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"unicode/utf8"
 
 	"github.com/bwmarrin/discordgo"
 
@@ -13,13 +14,18 @@ import (
 )
 
 type Client struct {
-	Ctx    context.RedditSpyCtx
+	Ctx    context.Ctx
 	Client *discordgo.Session
 	Bot    *redditDiscordBot.RedditDiscordBot
 }
 
-func New(ctx context.RedditSpyCtx, bot *redditDiscordBot.RedditDiscordBot) (*Client, error) {
-	dg, err := discordgo.New("Bot " + os.Getenv("discord.token"))
+func New(ctx context.Ctx, bot *redditDiscordBot.RedditDiscordBot) (*Client, error) {
+	token := os.Getenv("DISCORD_TOKEN")
+	if token == "" {
+		return nil, fmt.Errorf("DISCORD_TOKEN environment variable is required")
+	}
+
+	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create discord session: %w", err)
 	}
@@ -41,6 +47,10 @@ func New(ctx context.RedditSpyCtx, bot *redditDiscordBot.RedditDiscordBot) (*Cli
 	return client, nil
 }
 
+func (c *Client) Close() error {
+	return c.Client.Close()
+}
+
 type CommandConfig struct {
 	Command *discordgo.ApplicationCommand
 	Handler func(s *discordgo.Session, i *discordgo.InteractionCreate)
@@ -49,7 +59,6 @@ type CommandConfig struct {
 func (c *Client) RegisterCommands() error {
 	commands := []CommandConfig{
 		c.addSubredditListenerCommandConfig(),
-		// Add more command configurations here as needed
 	}
 
 	for _, cmdConfig := range commands {
@@ -71,11 +80,11 @@ func (c *Client) SendMessage(ctx context.Ctx, result *evaluator.MatchingEvaluati
 	if count > 0 {
 		return nil
 	}
-	end := 1024
-	if end > len(result.Post.Selftext) {
-		end = len(result.Post.Selftext)
+
+	substring := truncateUTF8(result.Post.Selftext, 1024)
+	if substring == "" {
+		substring = "(no text)"
 	}
-	substring := result.Post.Selftext[:end]
 
 	message := &discordgo.MessageSend{
 		Embed: &discordgo.MessageEmbed{
@@ -112,4 +121,12 @@ func (c *Client) SendMessage(ctx context.Ctx, result *evaluator.MatchingEvaluati
 		return fmt.Errorf("failed to insert notification into database: %w", err)
 	}
 	return nil
+}
+
+func truncateUTF8(s string, maxLen int) string {
+	if utf8.RuneCountInString(s) <= maxLen {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:maxLen])
 }
