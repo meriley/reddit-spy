@@ -595,46 +595,59 @@ Pedro reads one coherent daily digest per sub
 
 ## Implementation Progress
 
-| #   | Task                                                                 | Status  | Started | Completed | Commit |
-| --- | -------------------------------------------------------------------- | ------- | ------- | --------- | ------ |
-| 1   | check-history + setup-go bootstrap                                   | Pending | -       | -         | -      |
-| 2   | Add go-openai dep + `internal/llm/client.go`                         | Pending | -       | -         | -      |
-| 3   | `internal/llm/shaper.go` + `prompts.go`                              | Pending | -       | -         | -      |
-| 4   | `internal/llm/shaper_test.go`                                        | Pending | -       | -         | -      |
-| 5   | `scripts/schema.sql`                                                 | Pending | -       | -         | -      |
-| 6   | `RollingPost` + Get/Upsert in `internal/dbstore/store.go`            | Pending | -       | -         | -      |
-| 7   | Schema bootstrap on startup in `main.go`                             | Pending | -       | -         | -      |
-| 8   | Wire `LLM_*` / `TZ` / `LOG_LEVEL` env in `main.go`                   | Pending | -       | -         | -      |
-| 9   | Rewrite `SendMessage` — Fresh/Edit branches + 404 fallback           | Pending | -       | -         | -      |
-| 10  | `SendMessage` table-driven tests                                     | Pending | -       | -         | -      |
-| 11  | Drop `HEALTHCHECK pgrep` from `Dockerfile`                           | Pending | -       | -         | -      |
-| 12  | Update `makefile`/`Dockerfile` registry → Gitea                      | Pending | -       | -         | -      |
-| 13  | Port CI to `.gitea/workflows/ci.yml`                                 | Pending | -       | -         | -      |
-| 14  | Author `.gitea/workflows/build.yaml`                                 | Pending | -       | -         | -      |
-| 15  | Delete `.github/workflows/`                                          | Pending | -       | -         | -      |
-| 16  | `go-code-reviewer` agent sweep                                       | Pending | -       | -         | -      |
-| 17  | Create Gitea repo, push, verify CI green                             | Pending | -       | -         | -      |
-| 18  | `safe-commit` + `create-pr` (reddit-spy)                             | Pending | -       | -         | -      |
-| 19  | Scaffold `charts/reddit-spy/` in k3d-deployments                     | Pending | -       | -         | -      |
-| 20  | Generate SealedSecrets (discord, db, llm)                            | Pending | -       | -         | -      |
-| 21  | ArgoCD Application at `clusters/k3d-ai/applications/reddit-spy.yaml` | Pending | -       | -         | -      |
-| 22  | `helm lint` + server-side dry-run                                    | Pending | -       | -         | -      |
-| 23  | `safe-commit` + `create-pr` (k3d-deployments)                        | Pending | -       | -         | -      |
-| 24  | Create `reddit_spy` DB + role on `postgres-ai`                       | Pending | -       | -         | -      |
-| 25  | Author `docs/migration-to-ai-cluster.md` runbook                     | Pending | -       | -         | -      |
-| 26  | Execute migration (pg_dump → restore → row-count parity)             | Pending | -       | -         | -      |
-| 27  | Cutover (stop old, ArgoCD sync, verify pod + LLM + first digest)     | Pending | -       | -         | -      |
-| 28  | 7-day observation                                                    | Pending | -       | -         | -      |
-| 29  | Archive GitHub repo                                                  | Pending | -       | -         | -      |
+| #   | Task                                                                 | Status        | Started    | Completed  | Commit / PR                                                                               |
+| --- | -------------------------------------------------------------------- | ------------- | ---------- | ---------- | ----------------------------------------------------------------------------------------- |
+| 1   | check-history + setup-go bootstrap                                   | Done          | 2026-04-16 | 2026-04-16 | baseline clean (lint/build/test green)                                                    |
+| 2   | Add go-openai dep + `internal/llm/client.go`                         | Done          | 2026-04-16 | 2026-04-16 | `88ea59f`                                                                                 |
+| 3   | `internal/llm/shaper.go` + `prompts.go`                              | Done          | 2026-04-16 | 2026-04-16 | `88ea59f`                                                                                 |
+| 4   | `internal/llm/shaper_test.go`                                        | Done          | 2026-04-16 | 2026-04-16 | `88ea59f` + `471bde2` (malformed-json cases)                                              |
+| 5   | `internal/dbstore/sql/schema.sql`                                    | Done          | 2026-04-16 | 2026-04-16 | `88ea59f` (+ `471bde2` CHECK constraint)                                                  |
+| 6   | `RollingPost` + Get/Upsert in `internal/dbstore/store.go`            | Done          | 2026-04-16 | 2026-04-16 | `88ea59f`                                                                                 |
+| 7   | Schema bootstrap on startup in `main.go`                             | Done          | 2026-04-16 | 2026-04-16 | `88ea59f`                                                                                 |
+| 8   | Wire `LLM_*` / `TZ` / `LOG_LEVEL` env in `main.go`                   | Done          | 2026-04-16 | 2026-04-16 | `88ea59f`                                                                                 |
+| 9   | Rewrite `SendMessage` — Fresh/Edit branches + 404 fallback           | Done          | 2026-04-16 | 2026-04-16 | `88ea59f` + `471bde2` (403 no longer swallowed)                                           |
+| 10  | `SendMessage` table-driven tests                                     | Done          | 2026-04-16 | 2026-04-16 | `88ea59f` + `471bde2` (Phoenix-day edge case)                                             |
+| 11  | Drop `HEALTHCHECK pgrep` from `Dockerfile`                           | Done          | 2026-04-16 | 2026-04-16 | `c38a5bb`                                                                                 |
+| 12  | Update `makefile`/`Dockerfile` registry → Gitea                      | Done          | 2026-04-16 | 2026-04-16 | `c38a5bb`                                                                                 |
+| 13  | Port CI to `.gitea/workflows/ci.yml`                                 | Done          | 2026-04-16 | 2026-04-16 | `c38a5bb`                                                                                 |
+| 14  | Author `.gitea/workflows/build.yaml`                                 | Done          | 2026-04-16 | 2026-04-16 | `c38a5bb`                                                                                 |
+| 15  | Delete `.github/workflows/`                                          | Done          | 2026-04-16 | 2026-04-16 | `c38a5bb`                                                                                 |
+| 16  | `go-code-reviewer` agent sweep                                       | Done          | 2026-04-16 | 2026-04-16 | `471bde2` addresses all blocking + important findings                                     |
+| 17  | Create Gitea repo, push, verify CI green                             | Done          | 2026-04-16 | 2026-04-16 | `gitea.cmtriley.com/mriley/reddit-spy`; CI runs 1–3 all success                           |
+| 18  | `safe-commit` + `create-pr` (reddit-spy)                             | Done          | 2026-04-16 | 2026-04-16 | https://gitea.cmtriley.com/mriley/reddit-spy/pulls/1                                      |
+| 19  | Scaffold `charts/reddit-spy/` in k3d-deployments                     | Done          | 2026-04-16 | 2026-04-16 | `ba465525` (k3d-deployments)                                                              |
+| 20  | Generate SealedSecrets (discord, db, llm)                            | Partial       | 2026-04-16 | -          | LLM sealed (`ba465525`); discord + db sealing runbooked in `charts/reddit-spy/SECRETS.md` |
+| 21  | ArgoCD Application at `clusters/k3d-ai/applications/reddit-spy.yaml` | Done          | 2026-04-16 | 2026-04-16 | `ba465525` (k3d-deployments)                                                              |
+| 22  | `helm lint` + server-side dry-run                                    | Done          | 2026-04-16 | 2026-04-16 | 4/4 resources valid against live k3d-ai                                                   |
+| 23  | `safe-commit` + `create-pr` (k3d-deployments)                        | Done          | 2026-04-16 | 2026-04-16 | https://gitea.cmtriley.com/mriley/k3d-deployments/pulls/212                               |
+| 24  | Create `reddit_spy` DB + role on `postgres-ai`                       | Done (folded) | 2026-04-16 | 2026-04-16 | Absorbed into `dbstore.Bootstrap` via `POSTGRES_ADMIN_URL`                                |
+| 25  | Author `docs/migration-to-ai-cluster.md` runbook                     | Done          | 2026-04-16 | 2026-04-16 | committed alongside PRD v1.2 in this branch                                               |
+| 26  | Execute migration (pg_dump → restore → row-count parity)             | Blocked       | -          | -          | Needs source DB DSN from operator                                                         |
+| 27  | Cutover (stop old, ArgoCD sync, verify pod + LLM + first digest)     | Blocked       | -          | -          | Gated on #20 (discord + db sealing), #26, PR merges                                       |
+| 28  | 7-day observation                                                    | Pending       | -          | -          | Starts after #27                                                                          |
+| 29  | Archive GitHub repo                                                  | Pending       | -          | -          | Manual after #28 clean                                                                    |
 
 ### Progress Summary
 
 - **Total Tasks:** 29
-- **Completed:** 0 (0%)
-- **In Progress:** 0
-- **Blocked:** 0
-- **Pending:** 29
+- **Completed:** 25 (86%)
+- **Partial:** 1 (#20 — 1 of 3 SealedSecrets produced)
+- **Blocked:** 2 (#26, #27 — operator actions)
+- **Pending:** 1 (#28 starts after cutover, #29 after observation)
 - **Last Updated:** 2026-04-16
+
+### Operator handoff (what Pedro does next)
+
+1. Seal `reddit-spy-discord` + `reddit-spy-db-credentials` per
+   `charts/reddit-spy/SECRETS.md` in the k3d-deployments repo.
+2. Review + merge PR [#1 on reddit-spy](https://gitea.cmtriley.com/mriley/reddit-spy/pulls/1)
+   to trigger the Gitea Actions image build.
+3. Once the image tag appears in the Gitea registry, review + merge
+   [PR #212 on k3d-deployments](https://gitea.cmtriley.com/mriley/k3d-deployments/pulls/212)
+   so ArgoCD picks up the new Application.
+4. Follow `docs/migration-to-ai-cluster.md` to run the pg_dump, apply the
+   schema, restore, diff row counts, then cut over.
+5. Observe for a Phoenix week; archive the GitHub repo once green.
 
 **Commit convention:** tag commits with `[PRD Task N]` so progress can be
 auto-tracked. Example: `feat(llm): add vLLM shaper with Fresh/Update modes [PRD Task 3]`.
