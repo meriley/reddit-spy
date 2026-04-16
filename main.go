@@ -3,16 +3,19 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 
 	"github.com/go-kit/log/level"
 	"github.com/joho/godotenv"
-	ctx "github.com/meriley/reddit-spy/internal/context"
+
+	ctxpkg "github.com/meriley/reddit-spy/internal/context"
 	dbstore "github.com/meriley/reddit-spy/internal/dbstore"
 	"github.com/meriley/reddit-spy/internal/discord"
 	"github.com/meriley/reddit-spy/internal/evaluator"
+	"github.com/meriley/reddit-spy/internal/llm"
 	"github.com/meriley/reddit-spy/redditDiscordBot"
 )
 
@@ -22,14 +25,13 @@ func main() {
 	baseCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	appCtx := ctx.New(baseCtx)
+	// godotenv runs before ctxpkg.New so LOG_LEVEL set in config/.env takes
+	// effect on the logger created below.
+	_ = godotenv.Load("config/.env")
+
+	appCtx := ctxpkg.New(baseCtx)
 
 	_ = level.Info(appCtx.Log()).Log("msg", "starting reddit-spy", "version", version)
-
-	err := godotenv.Load("config/.env")
-	if err != nil {
-		_ = level.Warn(appCtx.Log()).Log("msg", "no .env file found, proceeding without it")
-	}
 
 	store, err := dbstore.New(appCtx)
 	if err != nil {
@@ -37,12 +39,27 @@ func main() {
 	}
 	defer store.Close()
 
+	if err := dbstore.Bootstrap(
+		appCtx,
+		store.Pool,
+		os.Getenv(dbstore.EnvPostgresUser),
+		os.Getenv(dbstore.EnvPostgresPassword),
+		os.Getenv(dbstore.EnvPostgresDatabase),
+	); err != nil {
+		panic(fmt.Errorf("failed to bootstrap db: %w", err))
+	}
+
 	bot, err := redditDiscordBot.New(appCtx, store)
 	if err != nil {
 		panic(fmt.Errorf("failed to create bot: %w", err))
 	}
 
-	discordClient, err := discord.New(appCtx, bot)
+	discordOpts := []discord.Option{}
+	if shaper := newShaper(appCtx); shaper != nil {
+		discordOpts = append(discordOpts, discord.WithShaper(shaper))
+	}
+
+	discordClient, err := discord.New(appCtx, bot, discordOpts...)
 	if err != nil {
 		panic(fmt.Errorf("failed to create discord client: %w", err))
 	}
@@ -85,4 +102,22 @@ func main() {
 		}
 	}()
 	wg.Wait()
+}
+
+// newShaper builds an LLM shaper from env vars. Returns nil (not an error) if
+// LLM_BASE_URL / LLM_MODEL aren't configured — reddit-spy degrades to the
+// raw-selftext behaviour rather than refusing to start.
+func newShaper(ctx ctxpkg.Ctx) *llm.Shaper {
+	cfg, err := llm.ConfigFromEnv()
+	if err != nil {
+		_ = level.Warn(ctx.Log()).Log("msg", "llm disabled", "reason", err.Error())
+		return nil
+	}
+	client, err := llm.NewClient(cfg)
+	if err != nil {
+		_ = level.Warn(ctx.Log()).Log("msg", "llm client init failed; disabling llm", "error", err)
+		return nil
+	}
+	_ = level.Info(ctx.Log()).Log("msg", "llm enabled", "base_url", cfg.BaseURL, "model", cfg.Model, "timeout", cfg.Timeout)
+	return llm.NewShaper(client, cfg)
 }

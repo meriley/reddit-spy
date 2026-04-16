@@ -3,6 +3,7 @@ package evaluator
 import (
 	"context"
 	"testing"
+	"time"
 
 	dbstore "github.com/meriley/reddit-spy/internal/dbstore"
 	redditJson "github.com/meriley/reddit-spy/internal/redditJSON"
@@ -95,9 +96,11 @@ func TestNewRuleEvaluator(t *testing.T) {
 
 	if eval == nil {
 		t.Fatal("NewRuleEvaluator returned nil")
+		return
 	}
 	if eval.EvaluateResponseChannel == nil {
 		t.Fatal("EvaluateResponseChannel is nil")
+		return
 	}
 	if cap(eval.EvaluateResponseChannel) != EvalChannelBuffer {
 		t.Errorf("channel capacity = %d, want %d", cap(eval.EvaluateResponseChannel), EvalChannelBuffer)
@@ -155,4 +158,10 @@ func (m *mockStore) GetSubreddits(_ context.Context) ([]*dbstore.Subreddit, erro
 }
 func (m *mockStore) GetNotificationCount(_ context.Context, _, _, _ int) (int, error) {
 	return 0, nil
+}
+func (m *mockStore) GetRollingPost(_ context.Context, _, _ int, _ time.Time) (*dbstore.RollingPost, error) {
+	return nil, nil
+}
+func (m *mockStore) UpsertRollingPost(_ context.Context, _ dbstore.RollingPost) (*dbstore.RollingPost, error) {
+	return nil, nil
 }
