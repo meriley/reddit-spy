@@ -94,6 +94,25 @@ pg_dump \
 `rolling_posts` is intentionally excluded — it doesn't exist on the source,
 and the first match after cutover will populate it naturally.
 
+### 4a. If your local pg_dump is older than the source server
+
+`pg_dump` refuses to dump from a newer server than its own major version.
+Run pg_dump inside an in-cluster pod of the right version instead — avoid
+`--rm` because the "pod deleted" cleanup message contaminates stdout:
+
+```bash
+kubectl run pgdump-source -i --restart=Never \
+  --namespace=ai --image=postgres:16-alpine \
+  --env="PGPASSWORD=$SOURCE_PW" \
+  --command -- pg_dump --data-only --no-owner --no-privileges \
+    --table=discord_servers --table=discord_channels --table=subreddits \
+    --table=rules --table=posts --table=notifications \
+    -h "$SOURCE_HOST" -U "$SOURCE_USER" "$SOURCE_DB" \
+  > /tmp/reddit-spy-data.sql
+
+kubectl -n ai delete pod pgdump-source --wait=false
+```
+
 ## 5. Apply schema + restore into reddit_spy
 
 The app's startup will also run `schema.sql`, so this step is only needed
