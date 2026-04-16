@@ -41,6 +41,9 @@ type Store interface {
 	UpdateRule(ctx context.Context, ruleID int, target string, exact bool) error
 	GetSubreddits(ctx context.Context) ([]*Subreddit, error)
 	GetNotificationCount(ctx context.Context, postID, channelID, ruleID int) (int, error)
+
+	GetRollingPost(ctx context.Context, channelID, subredditID int, dayLocal time.Time) (*RollingPost, error)
+	UpsertRollingPost(ctx context.Context, rp RollingPost) (*RollingPost, error)
 }
 
 type PGXStore struct {
@@ -491,4 +494,104 @@ func (db *PGXStore) UpdateRule(ctx context.Context, ruleID int, target string, e
 	}
 
 	return nil
+}
+
+// RollingPost is one Discord digest message that accumulates all rule matches
+// from a single subreddit on a single America/Phoenix local day. First match
+// of the day inserts the row and sends a new Discord message; subsequent
+// matches update the same row and edit the same Discord message in place.
+type RollingPost struct {
+	ID               int
+	ChannelID        int
+	SubredditID      int
+	DayLocal         time.Time
+	DiscordMessageID string
+	NarrativeTitle   string
+	NarrativeSummary string
+	IncludedPostIDs  []string
+	IncludedRuleIDs  []int
+	LatestScore      int
+	LatestComments   int
+	LatestURL        string
+	LatestThumbnail  string
+	UpdatedAt        time.Time
+}
+
+// GetRollingPost returns the rolling digest for (channel, subreddit, day_local)
+// if one exists. Returns (nil, nil) when there is no row yet — the caller uses
+// that to drive the Fresh vs Update branching.
+func (db *PGXStore) GetRollingPost(parent context.Context, channelID, subredditID int, dayLocal time.Time) (*RollingPost, error) {
+	qctx, cancel := context.WithTimeout(parent, DefaultQueryTimeout)
+	defer cancel()
+
+	query := `
+		SELECT id, channel_id, subreddit_id, day_local, discord_message_id,
+		       narrative_title, narrative_summary, included_post_ids,
+		       included_rule_ids, latest_score, latest_comments, latest_url,
+		       latest_thumbnail, updated_at
+		FROM rolling_posts
+		WHERE channel_id = $1 AND subreddit_id = $2 AND day_local = $3
+	`
+	var rp RollingPost
+	err := db.QueryRow(qctx, query, channelID, subredditID, dayLocal).Scan(
+		&rp.ID, &rp.ChannelID, &rp.SubredditID, &rp.DayLocal, &rp.DiscordMessageID,
+		&rp.NarrativeTitle, &rp.NarrativeSummary, &rp.IncludedPostIDs,
+		&rp.IncludedRuleIDs, &rp.LatestScore, &rp.LatestComments, &rp.LatestURL,
+		&rp.LatestThumbnail, &rp.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get rolling post: %w", err)
+	}
+	return &rp, nil
+}
+
+// UpsertRollingPost inserts or updates the rolling digest row keyed by
+// (channel_id, subreddit_id, day_local). On conflict, all mutable fields are
+// overwritten with the supplied values and updated_at is bumped.
+func (db *PGXStore) UpsertRollingPost(parent context.Context, rp RollingPost) (*RollingPost, error) {
+	qctx, cancel := context.WithTimeout(parent, DefaultQueryTimeout)
+	defer cancel()
+
+	query := `
+		INSERT INTO rolling_posts (
+			channel_id, subreddit_id, day_local, discord_message_id,
+			narrative_title, narrative_summary, included_post_ids,
+			included_rule_ids, latest_score, latest_comments, latest_url,
+			latest_thumbnail, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
+		ON CONFLICT (channel_id, subreddit_id, day_local) DO UPDATE SET
+			discord_message_id = EXCLUDED.discord_message_id,
+			narrative_title    = EXCLUDED.narrative_title,
+			narrative_summary  = EXCLUDED.narrative_summary,
+			included_post_ids  = EXCLUDED.included_post_ids,
+			included_rule_ids  = EXCLUDED.included_rule_ids,
+			latest_score       = EXCLUDED.latest_score,
+			latest_comments    = EXCLUDED.latest_comments,
+			latest_url         = EXCLUDED.latest_url,
+			latest_thumbnail   = EXCLUDED.latest_thumbnail,
+			updated_at         = now()
+		RETURNING id, channel_id, subreddit_id, day_local, discord_message_id,
+		          narrative_title, narrative_summary, included_post_ids,
+		          included_rule_ids, latest_score, latest_comments, latest_url,
+		          latest_thumbnail, updated_at
+	`
+	var out RollingPost
+	err := db.QueryRow(qctx, query,
+		rp.ChannelID, rp.SubredditID, rp.DayLocal, rp.DiscordMessageID,
+		rp.NarrativeTitle, rp.NarrativeSummary, rp.IncludedPostIDs,
+		rp.IncludedRuleIDs, rp.LatestScore, rp.LatestComments, rp.LatestURL,
+		rp.LatestThumbnail,
+	).Scan(
+		&out.ID, &out.ChannelID, &out.SubredditID, &out.DayLocal, &out.DiscordMessageID,
+		&out.NarrativeTitle, &out.NarrativeSummary, &out.IncludedPostIDs,
+		&out.IncludedRuleIDs, &out.LatestScore, &out.LatestComments, &out.LatestURL,
+		&out.LatestThumbnail, &out.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to upsert rolling post: %w", err)
+	}
+	return &out, nil
 }
