@@ -288,6 +288,14 @@ func (c *Client) SendMessage(ctx ctxpkg.Ctx, result *evaluator.MatchingEvaluatio
 		}
 	}
 
+	if rp.DiscordMessageID == "" {
+		// Defensive: every reachable branch above populates DiscordMessageID.
+		// If this fires, it's a structural bug in SendMessage, not a runtime
+		// failure we can recover from — surface it loudly rather than insert
+		// an empty string and trip the schema CHECK constraint on the next edit.
+		return fmt.Errorf("refusing to upsert rolling_posts with empty discord_message_id (channel=%d, sub=%d, day=%s)",
+			rp.ChannelID, rp.SubredditID, rp.DayLocal.Format("2006-01-02"))
+	}
 	if _, err := c.Bot.Store.UpsertRollingPost(ctx, rp); err != nil {
 		return fmt.Errorf("failed to upsert rolling post: %w", err)
 	}
@@ -441,18 +449,20 @@ func appendUniqueInt(list []int, v int) []int {
 	return append(list, v)
 }
 
-// isMessageGone returns true if the Discord REST error indicates that the
-// target message was deleted or is otherwise unreachable — i.e. we should
-// fall back to sending a fresh message.
+// isMessageGone returns true if the Discord REST error indicates the target
+// message has been deleted — i.e. sending a fresh one is the correct recovery.
+//
+// Deliberately NOT treating 403 as "gone": a 403 usually means the bot's
+// channel permissions regressed, and the fallback send would fail with the
+// same error, masking the real problem. Let 403s bubble up so they surface
+// in logs as a real failure.
 func isMessageGone(err error) bool {
 	if err == nil {
 		return false
 	}
 	var rest *discordgo.RESTError
 	if errors.As(err, &rest) {
-		// 404 Not Found or 403 Forbidden both indicate the bot can't edit
-		// the message; sending a fresh one is the correct recovery path.
-		if rest.Response != nil && (rest.Response.StatusCode == 404 || rest.Response.StatusCode == 403) {
+		if rest.Response != nil && rest.Response.StatusCode == 404 {
 			return true
 		}
 		if rest.Message != nil && rest.Message.Code == discordgo.ErrCodeUnknownMessage {

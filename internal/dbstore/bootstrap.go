@@ -59,7 +59,12 @@ func ensureRoleAndDatabase(ctx context.Context, adminURL, role, password, databa
 	// Postgres doesn't accept bind parameters inside CREATE ROLE / CREATE
 	// DATABASE, so identifiers are quoted via pgx.Identifier and the password
 	// is passed as a literal through doubled-quote escaping. The password
-	// originates from a sealed secret, not user input.
+	// originates from a sealed secret, not user input — but the fully
+	// constructed SQL travels over the wire in plaintext and is visible in
+	// pg_stat_activity and the server log's statement sample for the duration
+	// of the exec. Rotate the app password after any bootstrap against an
+	// audited database. Do NOT replace this with $1 bind parameters — they
+	// are a syntax error inside CREATE ROLE / EXECUTE format(...) context.
 	escapedPassword := "'" + strings.ReplaceAll(password, "'", "''") + "'"
 
 	roleDDL := fmt.Sprintf(`

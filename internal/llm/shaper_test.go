@@ -162,6 +162,24 @@ func TestShape_StripsCodeFences(t *testing.T) {
 	}
 }
 
+func TestShape_RejectsMalformedJSON(t *testing.T) {
+	cases := map[string]string{
+		"not json at all":  "Here is the digest: totally freeform text.",
+		"truncated object": `{"title":"ok","summary":"unter`,
+		"missing summary":  `{"title":"ok"}`,
+		"wrong types":      `{"title":42,"summary":true}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := &fakeCompleter{response: body}
+			s := NewShaper(f, Config{Model: "m"})
+			if _, err := s.ShapeFresh(context.Background(), FreshInput{Post: &redditJSON.RedditPost{}}); err == nil {
+				t.Fatalf("expected parse error for %q", body)
+			}
+		})
+	}
+}
+
 func TestShape_PropagatesTransportError(t *testing.T) {
 	f := &fakeCompleter{err: errors.New("boom")}
 	s := NewShaper(f, Config{Model: "m"})

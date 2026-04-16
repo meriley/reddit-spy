@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS rolling_posts (
     channel_id         INT  NOT NULL REFERENCES discord_channels(id) ON DELETE CASCADE,
     subreddit_id       INT  NOT NULL REFERENCES subreddits(id)       ON DELETE CASCADE,
     day_local          DATE NOT NULL,
-    discord_message_id TEXT NOT NULL,
+    discord_message_id TEXT NOT NULL CHECK (discord_message_id <> ''),
     narrative_title    TEXT NOT NULL,
     narrative_summary  TEXT NOT NULL,
     included_post_ids  TEXT[] NOT NULL DEFAULT '{}',

@@ -353,6 +353,36 @@ func TestSendMessage_DedupeShortCircuits(t *testing.T) {
 	}
 }
 
+// TestSendMessage_PhoenixDayBoundaryEarlyUTCMorning pins the Phoenix-day
+// contract: 03:00 UTC on day N is 20:00 on day N-1 in Phoenix, so the match
+// must land in day N-1's digest, not day N's. If someone "cleans up" SendMessage
+// by calling time.Now().UTC().Truncate(24h) this test breaks immediately.
+func TestSendMessage_PhoenixDayBoundaryEarlyUTCMorning(t *testing.T) {
+	store := newFakeStore()
+	sender := &fakeSender{nextMsgID: "msg-1"}
+	shaper := &fakeShaper{freshOut: llm.Output{Title: "T", Summary: "S"}}
+	// 2026-04-16 03:00 UTC = 2026-04-15 20:00 MST
+	now := func() time.Time { return time.Date(2026, 4, 16, 3, 0, 0, 0, time.UTC) }
+	c := buildClient(store, sender, shaper, now)
+
+	err := c.SendMessage(appCtx(t), newMatch(100, 2, &redditJSON.RedditPost{
+		ID: "p1", Subreddit: "Metalcore", Title: "evening thread",
+	}))
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	// The stored rolling post should live under 2026-04-15 (Phoenix day),
+	// not 2026-04-16 (UTC day).
+	rp15, _ := store.GetRollingPost(context.Background(), 1, 10, time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC))
+	rp16, _ := store.GetRollingPost(context.Background(), 1, 10, time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC))
+	if rp15 == nil {
+		t.Fatal("expected rolling_posts row for Phoenix day 2026-04-15; none stored")
+	}
+	if rp16 != nil {
+		t.Errorf("unexpected rolling_posts row for UTC day 2026-04-16 — day rollover is Phoenix, not UTC")
+	}
+}
+
 func TestSendMessage_NoShaperFallsBackToRawSelftext(t *testing.T) {
 	store := newFakeStore()
 	sender := &fakeSender{nextMsgID: "msg-1"}
