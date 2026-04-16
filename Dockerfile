@@ -17,6 +17,4 @@ USER user
 
 COPY --from=builder /app/reddit-spy ./reddit-spy
 
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD pgrep reddit-spy || exit 1
-
 ENTRYPOINT ["/app/reddit-spy"]

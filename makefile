@@ -1,7 +1,8 @@
 .PHONY: start build lint test vuln docker docker-build docker-tag docker-push
 
-VERSION := 2.0.8
-REGISTRY := merileyjr
+VERSION := 2.1.0
+REGISTRY := gitea.cmtriley.com/mriley
+IMAGE := $(REGISTRY)/reddit-spy
 export GOTOOLCHAIN := local
 
 start:
@@ -26,9 +27,9 @@ docker-build:
 	docker build --build-arg APP_VERSION=$(VERSION) -t reddit-spy:$(VERSION) .
 
 docker-tag:
-	docker tag reddit-spy:$(VERSION) $(REGISTRY)/reddit-spy:$(VERSION)
-	docker tag reddit-spy:$(VERSION) $(REGISTRY)/reddit-spy:latest
+	docker tag reddit-spy:$(VERSION) $(IMAGE):$(VERSION)
+	docker tag reddit-spy:$(VERSION) $(IMAGE):latest
 
 docker-push:
-	docker push $(REGISTRY)/reddit-spy:$(VERSION)
-	docker push $(REGISTRY)/reddit-spy:latest
+	docker push $(IMAGE):$(VERSION)
+	docker push $(IMAGE):latest
