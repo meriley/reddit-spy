@@ -12,7 +12,9 @@ RUN CGO_ENABLED=0 go build -ldflags="-X main.version=$APP_VERSION" -o reddit-spy
 FROM alpine:3.21
 WORKDIR /app
 
-RUN adduser -D user
+# tzdata: time.LoadLocation("America/Phoenix") reads /usr/share/zoneinfo
+# ca-certificates: HTTPS to Reddit + Discord
+RUN apk add --no-cache tzdata ca-certificates && adduser -D user
 USER user
 
 COPY --from=builder /app/reddit-spy ./reddit-spy
