@@ -3,21 +3,29 @@
 -- Runs on every pod startup against the application database with the app
 -- user's credentials. All statements are idempotent (IF NOT EXISTS) so this
 -- is safe to re-run after every deploy.
+--
+-- The six original tables (discord_servers, discord_channels, subreddits,
+-- rules, posts, notifications) mirror the source schema from the v2.0.x
+-- standalone deploy, including the `created_at` audit column, so a
+-- `pg_dump --data-only` from that source restores cleanly here.
 
 CREATE TABLE IF NOT EXISTS discord_servers (
-    id        SERIAL PRIMARY KEY,
-    server_id TEXT NOT NULL UNIQUE
+    id         SERIAL PRIMARY KEY,
+    server_id  TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS discord_channels (
     id         SERIAL PRIMARY KEY,
     channel_id TEXT NOT NULL UNIQUE,
-    server_id  INT  NOT NULL REFERENCES discord_servers(id) ON DELETE CASCADE
+    server_id  INT  NOT NULL REFERENCES discord_servers(id) ON DELETE CASCADE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS subreddits (
     id           SERIAL PRIMARY KEY,
-    subreddit_id TEXT NOT NULL UNIQUE
+    subreddit_id TEXT NOT NULL UNIQUE,
+    created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS rules (
@@ -26,14 +34,16 @@ CREATE TABLE IF NOT EXISTS rules (
     target_id    TEXT NOT NULL,
     exact        BOOLEAN NOT NULL DEFAULT FALSE,
     channel_id   INT  NOT NULL REFERENCES discord_channels(id) ON DELETE CASCADE,
-    subreddit_id INT  NOT NULL REFERENCES subreddits(id)       ON DELETE CASCADE
+    subreddit_id INT  NOT NULL REFERENCES subreddits(id)       ON DELETE CASCADE,
+    created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS rules_subreddit_id_idx ON rules(subreddit_id);
 CREATE INDEX IF NOT EXISTS rules_channel_id_idx   ON rules(channel_id);
 
 CREATE TABLE IF NOT EXISTS posts (
-    id      SERIAL PRIMARY KEY,
-    post_id TEXT NOT NULL UNIQUE
+    id         SERIAL PRIMARY KEY,
+    post_id    TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS notifications (
@@ -41,6 +51,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     post_id    INT NOT NULL REFERENCES posts(id)            ON DELETE CASCADE,
     channel_id INT NOT NULL REFERENCES discord_channels(id) ON DELETE CASCADE,
     rule_id    INT NOT NULL REFERENCES rules(id)            ON DELETE CASCADE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (post_id, channel_id, rule_id)
 );
 
