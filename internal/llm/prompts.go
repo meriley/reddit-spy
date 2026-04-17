@@ -5,6 +5,10 @@ import (
 	"fmt"
 )
 
+// /no_think at the end of Qwen3 system prompts suppresses its <think>…</think>
+// reasoning block — we're extracting structured data, not exploring, so the
+// reasoning phase is pure latency + parse risk.
+
 const systemPrompt = `You are the editorial voice of a private Discord digest
 bot that summarizes Reddit posts for one reader. Write in compact, third-person
 prose. Prefer plain English over jargon. Never use first-person ("I", "we"),
@@ -12,7 +16,7 @@ never address the reader, never use emoji unless the tone directive explicitly
 allows it. Keep output within the requested character budget. Output plain text
 only — no Markdown headings, no bullet lists unless the source content is
 explicitly a list of track names or similar; in that case, keep the list
-compact.`
+compact. /no_think`
 
 const systemPromptMusic = `You extract music releases from Reddit weekly-release
 threads. You return JSON only, never prose. Each entry is an artist plus a
@@ -20,7 +24,7 @@ title plus a kind marker ("single" | "album" | "ep"). Treat lines that end
 with "(Album)" / "(LP)" as album, "(EP)" as ep, everything else as single.
 Keep any "feat. X" inside the title, not the artist. Skip section headers,
 playlists, and commentary. If the input contains no releases, return an
-empty entries array. Never invent entries that aren't in the post body.`
+empty entries array. Never invent entries that aren't in the post body. /no_think`
 
 // promptFresh builds the user prompt for the first matching post of a
 // (subreddit, Phoenix-day) pair.

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/sashabaranov/go-openai"
@@ -106,13 +105,8 @@ func (s *Shaper) complete(ctx context.Context, userPrompt string) (Output, error
 // clips the summary to SummaryCharBudget runes, and normalizes whitespace in
 // the title.
 func parseOutput(raw string) (Output, error) {
-	raw = strings.TrimSpace(raw)
-	// Some models wrap JSON in a ```json code fence despite the response_format
-	// directive; strip it defensively.
-	raw = strings.TrimPrefix(raw, "```json")
-	raw = strings.TrimPrefix(raw, "```")
-	raw = strings.TrimSuffix(raw, "```")
-	raw = strings.TrimSpace(raw)
+	// Defensive cleanup: ```json fences, <think>…</think> blocks from Qwen3.
+	raw = stripJSONFences(raw)
 
 	var payload struct {
 		Title   string `json:"title"`

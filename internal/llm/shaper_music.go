@@ -134,8 +134,29 @@ func normalizeMusicTitle(t string) string {
 
 func stripJSONFences(raw string) string {
 	raw = strings.TrimSpace(raw)
+	raw = stripThinkBlock(raw)
 	raw = strings.TrimPrefix(raw, "```json")
 	raw = strings.TrimPrefix(raw, "```")
 	raw = strings.TrimSuffix(raw, "```")
 	return strings.TrimSpace(raw)
+}
+
+// stripThinkBlock removes any leading <think>…</think> reasoning block that
+// Qwen3 and similar models emit when they haven't received the /no_think
+// directive. If the </think> close tag is missing (model got cut off), drop
+// everything up through the first `{` or `[` which is where the real payload
+// starts for the digest shapers.
+func stripThinkBlock(s string) string {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "<think>") {
+		return s
+	}
+	if idx := strings.Index(s, "</think>"); idx >= 0 {
+		return strings.TrimSpace(s[idx+len("</think>"):])
+	}
+	// Close tag missing — fall back to first JSON delimiter.
+	if i := strings.IndexAny(s, "{["); i >= 0 {
+		return s[i:]
+	}
+	return s
 }
