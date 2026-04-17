@@ -206,15 +206,25 @@ func sortByPopularity(entries []llm.MusicEntry) {
 	})
 }
 
-// formatMusicLineCompact renders one entry as "**Artist** – Title `tag1, tag2`"
-// where the trailing backticked tags come from Last.fm and are omitted if
-// absent. No bullet, no kind suffix (the section header carries that).
+// formatMusicLineCompact renders one entry as:
+//
+//	**Artist** – [Title](https://music.youtube.com/watch?v=…) `tag1, tag2`
+//
+// When there's no Piped-sourced videoId the title stays unlinked. Tags come
+// from Last.fm and are omitted when absent. No bullet, no kind suffix (the
+// section header carries that).
 func formatMusicLineCompact(e llm.MusicEntry) string {
-	base := fmt.Sprintf("**%s** – %s", e.Artist, e.Title)
+	title := e.Title
+	if e.YoutubeID != "" {
+		// Markdown link title — escape any literal ']' in title so Discord's
+		// markdown parser doesn't terminate the link text early.
+		safe := strings.ReplaceAll(e.Title, "]", " ")
+		title = fmt.Sprintf("[%s](https://music.youtube.com/watch?v=%s)", safe, e.YoutubeID)
+	}
+	base := fmt.Sprintf("**%s** – %s", e.Artist, title)
 	if len(e.Tags) == 0 {
 		return base
 	}
-	// Cap at 2 tags for compactness regardless of how many we cached.
 	top := e.Tags
 	if len(top) > 2 {
 		top = top[:2]
@@ -318,13 +328,12 @@ func (c *Client) handleMusicMatch(
 		return nil
 	}
 
-	// Enrich with Last.fm listener counts. Prior entries (already stored with
-	// listener values) keep theirs; new ones get looked up. Best-effort —
-	// failures leave Listeners=0 and fall through to source order.
+	// Enrichment passes — each is best-effort; failures leave the entry
+	// un-annotated and fall back to source order / plain text.
 	merged = mergeListeners(merged, known)
 	merged = c.enrichMusicListeners(ctx, merged)
-	// Persist the newly-enriched listener counts so we don't re-lookup the
-	// same artists on the next match of the day.
+	merged = c.enrichMusicYouTubeIDs(ctx, merged)
+	// Persist enriched signals so we don't re-lookup on the next same-day match.
 	if enriched, eerr := encodeMusicEntries(merged); eerr == nil {
 		rp.Entries = enriched
 	}

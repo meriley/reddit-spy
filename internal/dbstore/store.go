@@ -51,6 +51,9 @@ type Store interface {
 	UpsertLastfmListeners(ctx context.Context, artistKey string, listeners int) error
 	GetLastfmArtist(ctx context.Context, artistKey string) (listeners int, tags []string, fetchedAt time.Time, ok bool, err error)
 	UpsertLastfmArtist(ctx context.Context, artistKey string, listeners int, tags []string) error
+
+	GetPipedVideo(ctx context.Context, queryKey string) (videoID string, fetchedAt time.Time, ok bool, err error)
+	UpsertPipedVideo(ctx context.Context, queryKey, videoID string) error
 }
 
 type PGXStore struct {
@@ -643,6 +646,42 @@ func (db *PGXStore) GetLastfmArtist(parent context.Context, artistKey string) (i
 		return 0, nil, time.Time{}, false, fmt.Errorf("failed to read lastfm cache: %w", err)
 	}
 	return listeners, tags, fetchedAt, true, nil
+}
+
+// GetPipedVideo returns the cached Piped search hit for a normalized query
+// key. The ok return is false on cache miss (no error).
+func (db *PGXStore) GetPipedVideo(parent context.Context, queryKey string) (string, time.Time, bool, error) {
+	qctx, cancel := context.WithTimeout(parent, DefaultQueryTimeout)
+	defer cancel()
+
+	var videoID string
+	var fetchedAt time.Time
+	err := db.QueryRow(qctx, `SELECT video_id, fetched_at FROM piped_cache WHERE query_key = $1`, queryKey).
+		Scan(&videoID, &fetchedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", time.Time{}, false, nil
+		}
+		return "", time.Time{}, false, fmt.Errorf("failed to read piped cache: %w", err)
+	}
+	return videoID, fetchedAt, true, nil
+}
+
+// UpsertPipedVideo writes a Piped search hit, refreshing fetched_at.
+// Empty videoID is a legitimate cacheable outcome (search returned nothing).
+func (db *PGXStore) UpsertPipedVideo(parent context.Context, queryKey, videoID string) error {
+	qctx, cancel := context.WithTimeout(parent, DefaultQueryTimeout)
+	defer cancel()
+	_, err := db.Exec(qctx, `
+		INSERT INTO piped_cache (query_key, video_id, fetched_at)
+		VALUES ($1, $2, now())
+		ON CONFLICT (query_key) DO UPDATE
+		SET video_id = EXCLUDED.video_id, fetched_at = now()
+	`, queryKey, videoID)
+	if err != nil {
+		return fmt.Errorf("failed to upsert piped cache: %w", err)
+	}
+	return nil
 }
 
 // UpsertLastfmArtist writes listeners + tags together, refreshing fetched_at.

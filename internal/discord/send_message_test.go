@@ -137,6 +137,10 @@ func (s *fakeStore) GetLastfmArtist(_ context.Context, _ string) (int, []string,
 func (s *fakeStore) UpsertLastfmArtist(_ context.Context, _ string, _ int, _ []string) error {
 	return nil
 }
+func (s *fakeStore) GetPipedVideo(_ context.Context, _ string) (string, time.Time, bool, error) {
+	return "", time.Time{}, false, nil
+}
+func (s *fakeStore) UpsertPipedVideo(_ context.Context, _, _ string) error { return nil }
 
 // ---------- fake sender ----------
 

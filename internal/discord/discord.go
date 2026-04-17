@@ -16,6 +16,7 @@ import (
 	"github.com/meriley/reddit-spy/internal/evaluator"
 	"github.com/meriley/reddit-spy/internal/lastfm"
 	"github.com/meriley/reddit-spy/internal/llm"
+	"github.com/meriley/reddit-spy/internal/piped"
 	"github.com/meriley/reddit-spy/redditDiscordBot"
 )
 
@@ -77,6 +78,10 @@ type Client struct {
 	// sorting. Optional — nil means the renderer falls back to source order.
 	lastfm *lastfm.Client
 
+	// piped searches a Piped API instance for a YouTube videoId per entry
+	// so the digest can link titles to music.youtube.com. Optional.
+	piped *piped.Client
+
 	// loc is the tz used to compute dayLocal. Loaded once at New() time.
 	loc *time.Location
 
@@ -115,6 +120,12 @@ func WithNow(now func() time.Time) Option {
 // with listener counts (popularity sort within each kind bucket).
 func WithLastfm(lf *lastfm.Client) Option {
 	return func(c *Client) { c.lastfm = lf }
+}
+
+// WithPiped attaches a Piped API client used to attach a YouTube videoId
+// per music-mode entry so titles render as clickable links.
+func WithPiped(p *piped.Client) Option {
+	return func(c *Client) { c.piped = p }
 }
 
 func New(ctx ctxpkg.Ctx, bot *redditDiscordBot.RedditDiscordBot, opts ...Option) (*Client, error) {

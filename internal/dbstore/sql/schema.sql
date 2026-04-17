@@ -104,3 +104,13 @@ CREATE TABLE IF NOT EXISTS lastfm_cache (
     fetched_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE lastfm_cache ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';
+
+-- Piped (YouTube-via-Piped) search cache. query_key is the normalized
+-- `artist title` string. video_id is the empty string if the search returned
+-- no results — we cache that outcome so we don't keep querying Piped for an
+-- artist+title pair that has no upload.
+CREATE TABLE IF NOT EXISTS piped_cache (
+    query_key  TEXT        PRIMARY KEY,
+    video_id   TEXT        NOT NULL DEFAULT '',
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

@@ -17,6 +17,7 @@ import (
 	"github.com/meriley/reddit-spy/internal/evaluator"
 	"github.com/meriley/reddit-spy/internal/lastfm"
 	"github.com/meriley/reddit-spy/internal/llm"
+	"github.com/meriley/reddit-spy/internal/piped"
 	"github.com/meriley/reddit-spy/redditDiscordBot"
 )
 
@@ -63,6 +64,13 @@ func main() {
 	// Postgres-backed cache. Always on — failures are soft and the digest
 	// falls back to source order.
 	discordOpts = append(discordOpts, discord.WithLastfm(lastfm.New(lastfm.DefaultTimeout)))
+	// YouTube link per entry via Piped — enabled only when PIPED_BASE_URL
+	// is configured (public instance or self-hosted). Failures soft-fall
+	// back to plain titles.
+	if pipedURL := os.Getenv("PIPED_BASE_URL"); pipedURL != "" {
+		discordOpts = append(discordOpts, discord.WithPiped(piped.New(pipedURL, piped.DefaultTimeout)))
+		_ = level.Info(appCtx.Log()).Log("msg", "piped enabled", "base_url", pipedURL)
+	}
 
 	discordClient, err := discord.New(appCtx, bot, discordOpts...)
 	if err != nil {
