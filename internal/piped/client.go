@@ -1,7 +1,7 @@
 // Package piped is a narrow client for the Piped API
-// (https://github.com/TeamPiped/Piped) used to attach a YouTube videoId to
-// each music-digest entry so Discord renders a clickable link. Keyless: any
-// public or self-hosted instance works behind PIPED_BASE_URL.
+// (https://github.com/TeamPiped/Piped) used to attach a YouTube link to each
+// music-digest entry so Discord renders it as clickable. Keyless: any public
+// or self-hosted instance works behind PIPED_BASE_URL.
 package piped
 
 import (
@@ -21,6 +21,12 @@ const DefaultTimeout = 6 * time.Second
 // ErrNoResult is returned when a Piped search returns zero items.
 var ErrNoResult = errors.New("piped: no search result")
 
+// Known Piped search filters used by this client.
+const (
+	FilterMusicSongs  = "music_songs"
+	FilterMusicAlbums = "music_albums"
+)
+
 type Client struct {
 	http    *http.Client
 	baseURL string
@@ -28,8 +34,7 @@ type Client struct {
 }
 
 // New returns a Client pointed at the supplied Piped API base URL (e.g.
-// "https://pipedapi.kavin.rocks" or the in-cluster service DNS). Trailing
-// slashes are normalized away.
+// "https://api.piped.private.coffee" or an in-cluster service DNS).
 func New(baseURL string, timeout time.Duration) *Client {
 	if timeout <= 0 {
 		timeout = DefaultTimeout
@@ -41,29 +46,35 @@ func New(baseURL string, timeout time.Duration) *Client {
 	}
 }
 
-// QueryKey returns the normalized cache key for an artist+title pair. The
-// bot uses it both as the DB primary key and as the search query string.
+// QueryKey returns the normalized query string for an artist+title pair.
+// Used as the search term AND as part of the cache key (prefixed by the
+// search filter).
 func QueryKey(artist, title string) string {
 	q := strings.TrimSpace(artist) + " " + strings.TrimSpace(title)
 	q = strings.Join(strings.Fields(strings.ToLower(q)), " ")
 	return q
 }
 
-// SearchFirstSong returns the videoId of the first music-song hit for the
-// `artist title` query. Retries on transient upstream failures (5xx) with
-// short backoff, matching the Last.fm client's pattern. Returns ErrNoResult
-// when the response has an empty items array — treat that as a cacheable
-// "no video" outcome.
-func (c *Client) SearchFirstSong(ctx context.Context, artist, title string) (string, error) {
+// CacheKey combines a Piped filter with a query, yielding a stable primary
+// key for the on-disk Piped result cache.
+func CacheKey(filter string, artist, title string) string {
+	return filter + "|" + QueryKey(artist, title)
+}
+
+// Search returns the first Piped hit's relative URL (e.g. "/watch?v=abcd" or
+// "/playlist?list=OLAK…") for the supplied query under the given filter.
+// Retries on 5xx + 429 with short backoff. ErrNoResult is a cacheable empty
+// hit; the caller should store it to avoid re-querying.
+func (c *Client) Search(ctx context.Context, query, filter string) (string, error) {
 	if c.baseURL == "" {
 		return "", errors.New("piped: empty base URL")
 	}
-	q := QueryKey(artist, title)
+	q := strings.TrimSpace(query)
 	if q == "" {
 		return "", errors.New("piped: empty query")
 	}
+	endpoint := fmt.Sprintf("%s/search?filter=%s&q=%s", c.baseURL, url.QueryEscape(filter), url.QueryEscape(q))
 
-	endpoint := fmt.Sprintf("%s/search?filter=music_songs&q=%s", c.baseURL, url.QueryEscape(q))
 	backoffs := []time.Duration{0, 250 * time.Millisecond, 750 * time.Millisecond}
 	var lastErr error
 	for _, delay := range backoffs {
@@ -74,9 +85,9 @@ func (c *Client) SearchFirstSong(ctx context.Context, artist, title string) (str
 				return "", ctx.Err()
 			}
 		}
-		id, err, retry := c.search(ctx, endpoint)
+		u, err, retry := c.fetch(ctx, endpoint, filter)
 		if !retry {
-			return id, err
+			return u, err
 		}
 		lastErr = err
 	}
@@ -86,9 +97,19 @@ func (c *Client) SearchFirstSong(ctx context.Context, artist, title string) (str
 	return "", lastErr
 }
 
-// search performs one HTTP attempt. The retry bool tells the caller whether
+// SearchFirstSong is a legacy wrapper — `Search(ctx, QueryKey(a,t), FilterMusicSongs)`.
+// Kept so callers that only want a song (singles mode) stay terse.
+func (c *Client) SearchFirstSong(ctx context.Context, artist, title string) (string, error) {
+	raw, err := c.Search(ctx, QueryKey(artist, title), FilterMusicSongs)
+	if err != nil {
+		return "", err
+	}
+	return videoIDFromURL(raw), nil
+}
+
+// fetch performs a single HTTP attempt. The retry flag tells the caller if
 // it's safe to replay.
-func (c *Client) search(ctx context.Context, endpoint string) (string, error, bool) {
+func (c *Client) fetch(ctx context.Context, endpoint, filter string) (string, error, bool) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return "", err, false
@@ -104,7 +125,6 @@ func (c *Client) search(ctx context.Context, endpoint string) (string, error, bo
 
 	switch {
 	case resp.StatusCode == http.StatusOK:
-		// fall through
 	case resp.StatusCode >= 500 && resp.StatusCode < 600:
 		return "", fmt.Errorf("piped: transient HTTP %d", resp.StatusCode), true
 	case resp.StatusCode == http.StatusTooManyRequests:
@@ -126,22 +146,53 @@ func (c *Client) search(ctx context.Context, endpoint string) (string, error, bo
 	if err := json.Unmarshal(body, &out); err != nil {
 		return "", fmt.Errorf("piped: decode response: %w", err), false
 	}
+
+	want := firstItemTypeFor(filter)
 	for _, it := range out.Items {
-		// Piped marks song hits as "stream"; anything else (channel, playlist
-		// etc.) is ignored — we only want playable video ids.
-		if it.Type != "" && it.Type != "stream" {
+		if want != "" && it.Type != "" && it.Type != want {
 			continue
 		}
-		if id := videoIDFromURL(it.URL); id != "" {
-			return id, nil, false
+		if it.URL != "" {
+			return it.URL, nil, false
 		}
 	}
 	return "", ErrNoResult, false
 }
 
-// videoIDFromURL pulls `abcd1234` out of "/watch?v=abcd1234" or
-// "https://www.youtube.com/watch?v=abcd1234&list=…" or "https://youtu.be/abcd".
-// Returns "" for anything else.
+// firstItemTypeFor returns the expected Piped result type for a given filter.
+// music_albums → "playlist" (album playlists); music_songs → "stream".
+func firstItemTypeFor(filter string) string {
+	switch filter {
+	case FilterMusicAlbums:
+		return "playlist"
+	case FilterMusicSongs:
+		return "stream"
+	}
+	return ""
+}
+
+// ToYouTubeURL maps a Piped-relative URL to a music.youtube.com URL the
+// digest renders. Returns "" for anything it doesn't know how to handle.
+func ToYouTubeURL(relative string) string {
+	if relative == "" {
+		return ""
+	}
+	u, err := url.Parse(relative)
+	if err != nil {
+		return ""
+	}
+	switch {
+	case u.Path == "/watch" && u.Query().Get("v") != "":
+		return "https://music.youtube.com/watch?v=" + u.Query().Get("v")
+	case u.Path == "/playlist" && u.Query().Get("list") != "":
+		return "https://music.youtube.com/playlist?list=" + u.Query().Get("list")
+	case strings.HasSuffix(u.Host, "youtu.be") && strings.Trim(u.Path, "/") != "":
+		return "https://music.youtube.com/watch?v=" + strings.Split(strings.Trim(u.Path, "/"), "/")[0]
+	}
+	return ""
+}
+
+// videoIDFromURL is retained for the legacy SearchFirstSong path + tests.
 func videoIDFromURL(raw string) string {
 	if raw == "" {
 		return ""
@@ -153,7 +204,6 @@ func videoIDFromURL(raw string) string {
 	if v := u.Query().Get("v"); v != "" {
 		return v
 	}
-	// youtu.be short form: host is "youtu.be", id is the first path segment.
 	if strings.HasSuffix(u.Host, "youtu.be") {
 		if p := strings.Trim(u.Path, "/"); p != "" {
 			return strings.Split(p, "/")[0]
@@ -162,8 +212,8 @@ func videoIDFromURL(raw string) string {
 	return ""
 }
 
-// YoutubeURL formats a videoId as a music.youtube.com URL — opens in YT Music
-// for users who prefer it, falls back to regular playback for everyone else.
+// YoutubeURL is the legacy id-only formatter. New callers should use
+// ToYouTubeURL on the raw relative URL so playlist links survive.
 func YoutubeURL(videoID string) string {
 	if videoID == "" {
 		return ""

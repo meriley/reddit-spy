@@ -208,18 +208,18 @@ func sortByPopularity(entries []llm.MusicEntry) {
 
 // formatMusicLineCompact renders one entry as:
 //
-//	**Artist** – [Title](https://music.youtube.com/watch?v=…) `tag1, tag2`
+//	**Artist** – [Title](https://music.youtube.com/…) `tag1, tag2`
 //
-// When there's no Piped-sourced videoId the title stays unlinked. Tags come
-// from Last.fm and are omitted when absent. No bullet, no kind suffix (the
-// section header carries that).
+// The URL may be a watch?v=… (song) or a playlist?list=… (full album playlist).
+// When there's no Piped-sourced URL the title stays unlinked. Tags come from
+// Last.fm and are omitted when absent.
 func formatMusicLineCompact(e llm.MusicEntry) string {
 	title := e.Title
-	if e.YoutubeID != "" {
-		// Markdown link title — escape any literal ']' in title so Discord's
-		// markdown parser doesn't terminate the link text early.
+	if e.YoutubeURL != "" {
+		// Escape any literal ']' in the title so Discord's markdown parser
+		// doesn't truncate the link text at it.
 		safe := strings.ReplaceAll(e.Title, "]", " ")
-		title = fmt.Sprintf("[%s](https://music.youtube.com/watch?v=%s)", safe, e.YoutubeID)
+		title = fmt.Sprintf("[%s](%s)", safe, e.YoutubeURL)
 	}
 	base := fmt.Sprintf("**%s** – %s", e.Artist, title)
 	if len(e.Tags) == 0 {

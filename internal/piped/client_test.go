@@ -41,3 +41,28 @@ func TestYoutubeURL(t *testing.T) {
 		t.Errorf("empty id should yield empty url, got %q", got)
 	}
 }
+
+func TestToYouTubeURL(t *testing.T) {
+	cases := map[string]string{
+		"/watch?v=abcd1234": "https://music.youtube.com/watch?v=abcd1234",
+		"/playlist?list=OLAK5uy_nk_HirDdQDT15LX0RjMk9pqKsOr": "https://music.youtube.com/playlist?list=OLAK5uy_nk_HirDdQDT15LX0RjMk9pqKsOr",
+		"/watch":             "",
+		"/playlist":          "",
+		"":                   "",
+		"https://youtu.be/x": "https://music.youtube.com/watch?v=x",
+		"/channel/UCxyz":     "",
+	}
+	for in, want := range cases {
+		if got := ToYouTubeURL(in); got != want {
+			t.Errorf("ToYouTubeURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCacheKey(t *testing.T) {
+	got := CacheKey(FilterMusicSongs, "Wage War", "It Calls Me By Name")
+	want := "music_songs|wage war it calls me by name"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

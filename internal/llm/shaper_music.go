@@ -27,11 +27,11 @@ type MusicEntry struct {
 	// Nil/empty is normal for unknown artists; renderer treats absent tags
 	// as "no genre annotation available" and doesn't penalize ordering.
 	Tags []string `json:"tags,omitempty"`
-	// YoutubeID is the first Piped search hit for "artist title", used to
-	// make the rendered title a clickable music.youtube.com link. Empty
-	// when Piped is disabled, lookups failed, or the search returned no
-	// results.
-	YoutubeID string `json:"youtube_id,omitempty"`
+	// YoutubeURL is the full music.youtube.com URL for the release — a
+	// playlist URL for albums/EPs when Piped found one, or a watch URL for
+	// singles (and as a fallback when no album playlist exists). Empty when
+	// Piped is disabled, lookups failed, or the search returned no results.
+	YoutubeURL string `json:"youtube_url,omitempty"`
 }
 
 // MusicInput drives a single ShapeMusic call. Pass the existing entries via

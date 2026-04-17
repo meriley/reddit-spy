@@ -105,12 +105,15 @@ CREATE TABLE IF NOT EXISTS lastfm_cache (
 );
 ALTER TABLE lastfm_cache ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';
 
--- Piped (YouTube-via-Piped) search cache. query_key is the normalized
--- `artist title` string. video_id is the empty string if the search returned
--- no results — we cache that outcome so we don't keep querying Piped for an
--- artist+title pair that has no upload.
+-- Piped (YouTube-via-Piped) search cache. query_key is "filter|artist title"
+-- so album searches and song searches are cached independently. youtube_url
+-- is the full music.youtube.com URL (watch OR playlist) we hand to Discord.
+-- Empty youtube_url is a legitimate cached outcome — the search returned no
+-- match, so we stop re-querying Piped for it.
 CREATE TABLE IF NOT EXISTS piped_cache (
-    query_key  TEXT        PRIMARY KEY,
-    video_id   TEXT        NOT NULL DEFAULT '',
-    fetched_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    query_key   TEXT        PRIMARY KEY,
+    video_id    TEXT        NOT NULL DEFAULT '',   -- legacy (songs-only); kept for one release
+    youtube_url TEXT        NOT NULL DEFAULT '',
+    fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE piped_cache ADD COLUMN IF NOT EXISTS youtube_url TEXT NOT NULL DEFAULT '';
