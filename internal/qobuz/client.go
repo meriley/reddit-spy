@@ -105,10 +105,19 @@ func (c *Client) fetchSearch(ctx context.Context, endpoint, artist string) (stri
 
 	switch {
 	case resp.StatusCode == http.StatusOK:
+	case resp.StatusCode == http.StatusNotFound:
+		// Qobuz returns 404 for some query shapes that have no content at
+		// all; treat the same as a no-match search result (cacheable).
+		return "", ErrNoResult, false
 	case resp.StatusCode >= 500 && resp.StatusCode < 600:
 		return "", fmt.Errorf("qobuz: transient HTTP %d", resp.StatusCode), true
 	case resp.StatusCode == http.StatusTooManyRequests:
 		return "", fmt.Errorf("qobuz: rate-limited (HTTP 429)"), true
+	case resp.StatusCode == http.StatusForbidden:
+		// 403 typically means Qobuz didn't like the UA fingerprint for this
+		// request — transient in practice, retry with backoff may land on
+		// a different edge.
+		return "", fmt.Errorf("qobuz: blocked (HTTP 403)"), true
 	default:
 		return "", fmt.Errorf("qobuz: HTTP %d", resp.StatusCode), false
 	}

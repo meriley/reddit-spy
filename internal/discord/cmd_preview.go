@@ -238,10 +238,19 @@ func (c *Client) previewMusic(
 	merged = mergeListeners(merged, known)
 	merged = c.enrichMusicAll(ctx, merged)
 	embeds := renderMusicEmbeds(rp, merged, subreddit.ExternalID)
+	// Discord caps the TOTAL embed size in a single message at 6000 chars.
+	// A full-digest post sends one embed per message, so there's no total
+	// cap in production — but a preview followup packs everything into one
+	// reply. Ship the first embed only and flag overflow in the notice.
+	overflowMsg := ""
+	if len(embeds) > 1 {
+		overflowMsg = fmt.Sprintf(" (showing section 1/%d — full digest spans multiple messages in production)", len(embeds))
+		embeds = embeds[:1]
+	}
 	notice := fmt.Sprintf(
-		":microscope: **Preview (music)** — %d new release(s) extracted, %d total in the simulated digest. "+
+		":microscope: **Preview (music)** — %d new release(s) extracted, %d total in the simulated digest.%s "+
 			"Nothing was sent to the channel and no DB rows changed.\nRule `#%d` on r/%s.",
-		len(newEntries), len(merged), rule.ID, post.Subreddit,
+		len(newEntries), len(merged), overflowMsg, rule.ID, post.Subreddit,
 	)
 	return embeds, notice, nil
 }
