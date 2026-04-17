@@ -92,6 +92,13 @@ WHERE  discord_message_id <> ''
 -- Drop the legacy 'discord_message_id <> ''' CHECK — the array is now the
 -- authoritative message list; new code writes '' to the scalar column.
 ALTER TABLE rolling_posts DROP CONSTRAINT IF EXISTS rolling_posts_discord_message_id_check;
+-- Make the legacy scalar column optional. New code only writes to
+-- discord_message_ids[]; existing deploys created the column as NOT NULL
+-- with no default, which broke upserts from the new code and caused
+-- double-posts on 2026-04-17 (the upsert errored, so InsertNotification
+-- never ran, so the same reddit post was re-processed and re-sent).
+ALTER TABLE rolling_posts ALTER COLUMN discord_message_id DROP NOT NULL;
+ALTER TABLE rolling_posts ALTER COLUMN discord_message_id SET DEFAULT '';
 CREATE INDEX IF NOT EXISTS rolling_posts_day_idx ON rolling_posts(day_local);
 
 -- Last.fm listener-count + tags cache. artist_key is the normalized artist
