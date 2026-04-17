@@ -236,9 +236,7 @@ func (c *Client) previewMusic(
 		return nil, "", err
 	}
 	merged = mergeListeners(merged, known)
-	merged = c.enrichMusicListeners(ctx, merged)
-	merged = c.enrichMusicYouTubeIDs(ctx, merged)
-	merged = c.enrichMusicQobuzURLs(ctx, merged)
+	merged = c.enrichMusicAll(ctx, merged)
 	embeds := renderMusicEmbeds(rp, merged, subreddit.ExternalID)
 	notice := fmt.Sprintf(
 		":microscope: **Preview (music)** — %d new release(s) extracted, %d total in the simulated digest. "+

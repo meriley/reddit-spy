@@ -333,11 +333,11 @@ func (c *Client) handleMusicMatch(
 	}
 
 	// Enrichment passes — each is best-effort; failures leave the entry
-	// un-annotated and fall back to source order / plain text.
+	// un-annotated and fall back to source order / plain text. The three
+	// passes run in parallel (enrichMusicAll) so the user-facing latency
+	// is max(lastfm, piped, qobuz), not their sum.
 	merged = mergeListeners(merged, known)
-	merged = c.enrichMusicListeners(ctx, merged)
-	merged = c.enrichMusicYouTubeIDs(ctx, merged)
-	merged = c.enrichMusicQobuzURLs(ctx, merged)
+	merged = c.enrichMusicAll(ctx, merged)
 	// Persist enriched signals so we don't re-lookup on the next same-day match.
 	if enriched, eerr := encodeMusicEntries(merged); eerr == nil {
 		rp.Entries = enriched
