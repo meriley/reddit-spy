@@ -86,18 +86,31 @@ func (c *Client) previewHandler(s *discordgo.Session, i *discordgo.InteractionCr
 		return
 	}
 
-	// Discord caps embeds per message at 10. Preview should normally fit,
-	// but truncate defensively so a sprawling music digest doesn't 400.
+	// Discord enforces a per-MESSAGE 6000-char budget across all embeds in
+	// the same message. The music renderer already chunks each section into
+	// its own embed to fit the 4096-char description cap, so each embed is
+	// safe on its own — we just need to send one followup per embed (not
+	// pack them all into one). First followup carries the notice; the rest
+	// are embed-only continuations. Hard-cap at 10 followups defensively.
+	if len(embeds) == 0 {
+		return
+	}
 	if len(embeds) > 10 {
 		embeds = embeds[:10]
 	}
-
-	if _, ferr := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
-		Content: notice,
-		Embeds:  embeds,
-		Flags:   flags,
-	}); ferr != nil {
-		_ = level.Error(c.Ctx.Log()).Log("msg", "preview_digest: followup failed", "error", ferr)
+	for idx, e := range embeds {
+		content := ""
+		if idx == 0 {
+			content = notice
+		}
+		if _, ferr := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+			Content: content,
+			Embeds:  []*discordgo.MessageEmbed{e},
+			Flags:   flags,
+		}); ferr != nil {
+			_ = level.Error(c.Ctx.Log()).Log("msg", "preview_digest: followup failed", "index", idx, "error", ferr)
+			return
+		}
 	}
 }
 
@@ -238,19 +251,11 @@ func (c *Client) previewMusic(
 	merged = mergeListeners(merged, known)
 	merged = c.enrichMusicAll(ctx, merged)
 	embeds := renderMusicEmbeds(rp, merged, subreddit.ExternalID)
-	// Discord caps the TOTAL embed size in a single message at 6000 chars.
-	// A full-digest post sends one embed per message, so there's no total
-	// cap in production — but a preview followup packs everything into one
-	// reply. Ship the first embed only and flag overflow in the notice.
-	overflowMsg := ""
-	if len(embeds) > 1 {
-		overflowMsg = fmt.Sprintf(" (showing section 1/%d — full digest spans multiple messages in production)", len(embeds))
-		embeds = embeds[:1]
-	}
+	// Caller sends one followup per embed — same trick the live post uses.
 	notice := fmt.Sprintf(
-		":microscope: **Preview (music)** — %d new release(s) extracted, %d total in the simulated digest.%s "+
-			"Nothing was sent to the channel and no DB rows changed.\nRule `#%d` on r/%s.",
-		len(newEntries), len(merged), overflowMsg, rule.ID, post.Subreddit,
+		":microscope: **Preview (music)** — %d new release(s) extracted, %d total in the simulated digest "+
+			"across %d section(s). Nothing was sent to the channel and no DB rows changed.\nRule `#%d` on r/%s.",
+		len(newEntries), len(merged), len(embeds), rule.ID, post.Subreddit,
 	)
 	return embeds, notice, nil
 }
