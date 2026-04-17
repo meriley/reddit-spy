@@ -15,6 +15,7 @@ import (
 	dbstore "github.com/meriley/reddit-spy/internal/dbstore"
 	"github.com/meriley/reddit-spy/internal/discord"
 	"github.com/meriley/reddit-spy/internal/evaluator"
+	"github.com/meriley/reddit-spy/internal/lastfm"
 	"github.com/meriley/reddit-spy/internal/llm"
 	"github.com/meriley/reddit-spy/redditDiscordBot"
 )
@@ -58,6 +59,10 @@ func main() {
 	if shaper := newShaper(appCtx); shaper != nil {
 		discordOpts = append(discordOpts, discord.WithShaper(shaper))
 	}
+	// Music-mode popularity sort: keyless Last.fm artist-page scrape with a
+	// Postgres-backed cache. Always on — failures are soft and the digest
+	// falls back to source order.
+	discordOpts = append(discordOpts, discord.WithLastfm(lastfm.New(lastfm.DefaultTimeout)))
 
 	discordClient, err := discord.New(appCtx, bot, discordOpts...)
 	if err != nil {

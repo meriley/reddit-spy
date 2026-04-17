@@ -127,6 +127,10 @@ func (s *fakeStore) GetRuleByID(_ context.Context, _ int) (*dbstore.RuleDetail, 
 func (s *fakeStore) DeleteRule(_ context.Context, _ int) error                   { return nil }
 func (s *fakeStore) UpdateRule(_ context.Context, _ int, _ string, _ bool) error { return nil }
 func (s *fakeStore) UpdateRuleMode(_ context.Context, _ int, _ string) error     { return nil }
+func (s *fakeStore) GetLastfmListeners(_ context.Context, _ string) (int, time.Time, bool, error) {
+	return 0, time.Time{}, false, nil
+}
+func (s *fakeStore) UpsertLastfmListeners(_ context.Context, _ string, _ int) error { return nil }
 
 // ---------- fake sender ----------
 

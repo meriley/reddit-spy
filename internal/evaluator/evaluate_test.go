@@ -159,6 +159,12 @@ func (m *mockStore) UpdateRule(_ context.Context, _ int, _ string, _ bool) error
 func (m *mockStore) UpdateRuleMode(_ context.Context, _ int, _ string) error {
 	return nil
 }
+func (m *mockStore) GetLastfmListeners(_ context.Context, _ string) (int, time.Time, bool, error) {
+	return 0, time.Time{}, false, nil
+}
+func (m *mockStore) UpsertLastfmListeners(_ context.Context, _ string, _ int) error {
+	return nil
+}
 func (m *mockStore) GetSubreddits(_ context.Context) ([]*dbstore.Subreddit, error) {
 	return nil, nil
 }

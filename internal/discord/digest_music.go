@@ -3,6 +3,7 @@ package discord
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -146,13 +147,13 @@ func renderMusicEmbeds(rp dbstore.RollingPost, entries []llm.MusicEntry, subredd
 }
 
 // groupAndFormatMusic sorts entries into album / ep / single buckets (in
-// that order), emits a short header per non-empty bucket, and renders one
-// tight line per entry. Kind isn't repeated on each row — the section header
-// already communicates it.
+// that order), popularity-sorts within each bucket (Last.fm listener count
+// desc; unknowns fall to the bottom in source order), and renders one tight
+// line per entry.
 func groupAndFormatMusic(entries []llm.MusicEntry) []string {
 	type bucket struct {
-		header string
-		rows   []string
+		header  string
+		members []llm.MusicEntry
 	}
 	buckets := []*bucket{
 		{header: "**Albums**"},
@@ -160,29 +161,49 @@ func groupAndFormatMusic(entries []llm.MusicEntry) []string {
 		{header: "**Singles**"},
 	}
 	for _, e := range entries {
-		line := formatMusicLineCompact(e)
 		switch strings.ToLower(e.Kind) {
 		case "album":
-			buckets[0].rows = append(buckets[0].rows, line)
+			buckets[0].members = append(buckets[0].members, e)
 		case "ep":
-			buckets[1].rows = append(buckets[1].rows, line)
+			buckets[1].members = append(buckets[1].members, e)
 		default:
-			buckets[2].rows = append(buckets[2].rows, line)
+			buckets[2].members = append(buckets[2].members, e)
 		}
+	}
+	for _, b := range buckets {
+		sortByPopularity(b.members)
 	}
 
 	var lines []string
 	for _, b := range buckets {
-		if len(b.rows) == 0 {
+		if len(b.members) == 0 {
 			continue
 		}
 		if len(lines) > 0 {
 			lines = append(lines, "") // blank line between sections
 		}
 		lines = append(lines, b.header)
-		lines = append(lines, b.rows...)
+		for _, e := range b.members {
+			lines = append(lines, formatMusicLineCompact(e))
+		}
 	}
 	return lines
+}
+
+// sortByPopularity orders entries by Last.fm listener count desc. Entries
+// with zero (unknown) sink to the bottom; within each partition we preserve
+// source order (stable sort) so the curator's ordering survives for ties.
+func sortByPopularity(entries []llm.MusicEntry) {
+	sort.SliceStable(entries, func(i, j int) bool {
+		a, b := entries[i], entries[j]
+		if a.Listeners == 0 && b.Listeners != 0 {
+			return false
+		}
+		if a.Listeners != 0 && b.Listeners == 0 {
+			return true
+		}
+		return a.Listeners > b.Listeners
+	})
 }
 
 // formatMusicLineCompact renders one entry as "**Artist** – Title" with an
@@ -286,6 +307,17 @@ func (c *Client) handleMusicMatch(
 			return fmt.Errorf("insert notification for empty music match: %w", nerr)
 		}
 		return nil
+	}
+
+	// Enrich with Last.fm listener counts. Prior entries (already stored with
+	// listener values) keep theirs; new ones get looked up. Best-effort —
+	// failures leave Listeners=0 and fall through to source order.
+	merged = mergeListeners(merged, known)
+	merged = c.enrichMusicListeners(ctx, merged)
+	// Persist the newly-enriched listener counts so we don't re-lookup the
+	// same artists on the next match of the day.
+	if enriched, eerr := encodeMusicEntries(merged); eerr == nil {
+		rp.Entries = enriched
 	}
 
 	embeds := renderMusicEmbeds(rp, merged, subreddit.ExternalID)

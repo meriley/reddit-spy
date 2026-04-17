@@ -19,6 +19,10 @@ type MusicEntry struct {
 	Title        string `json:"title"`
 	Kind         string `json:"kind"` // "single" | "album" | "ep"
 	SourcePostID string `json:"source_post_id"`
+	// Listeners is the Last.fm monthly-listener count, looked up post-
+	// extraction. Zero means "unknown / not looked up yet"; the renderer
+	// uses this only as a popularity tiebreaker and never requires it.
+	Listeners int `json:"listeners,omitempty"`
 }
 
 // MusicInput drives a single ShapeMusic call. Pass the existing entries via

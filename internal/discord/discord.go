@@ -14,6 +14,7 @@ import (
 	ctxpkg "github.com/meriley/reddit-spy/internal/context"
 	dbstore "github.com/meriley/reddit-spy/internal/dbstore"
 	"github.com/meriley/reddit-spy/internal/evaluator"
+	"github.com/meriley/reddit-spy/internal/lastfm"
 	"github.com/meriley/reddit-spy/internal/llm"
 	"github.com/meriley/reddit-spy/redditDiscordBot"
 )
@@ -72,6 +73,10 @@ type Client struct {
 	// Client but is overridable by tests.
 	sender MessageSender
 
+	// lastfm looks up per-artist listener counts for music-mode popularity
+	// sorting. Optional — nil means the renderer falls back to source order.
+	lastfm *lastfm.Client
+
 	// loc is the tz used to compute dayLocal. Loaded once at New() time.
 	loc *time.Location
 
@@ -104,6 +109,12 @@ func WithSender(m MessageSender) Option {
 // WithNow overrides the clock used to compute dayLocal (used by tests).
 func WithNow(now func() time.Time) Option {
 	return func(c *Client) { c.now = now }
+}
+
+// WithLastfm attaches a Last.fm client used to enrich music-mode entries
+// with listener counts (popularity sort within each kind bucket).
+func WithLastfm(lf *lastfm.Client) Option {
+	return func(c *Client) { c.lastfm = lf }
 }
 
 func New(ctx ctxpkg.Ctx, bot *redditDiscordBot.RedditDiscordBot, opts ...Option) (*Client, error) {

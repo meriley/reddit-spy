@@ -46,6 +46,9 @@ type Store interface {
 
 	GetRollingPost(ctx context.Context, channelID, subredditID int, dayLocal time.Time) (*RollingPost, error)
 	UpsertRollingPost(ctx context.Context, rp RollingPost) (*RollingPost, error)
+
+	GetLastfmListeners(ctx context.Context, artistKey string) (listeners int, fetchedAt time.Time, ok bool, err error)
+	UpsertLastfmListeners(ctx context.Context, artistKey string, listeners int) error
 }
 
 type PGXStore struct {
@@ -582,6 +585,43 @@ func (db *PGXStore) GetRollingPost(parent context.Context, channelID, subredditI
 		return nil, fmt.Errorf("failed to get rolling post: %w", err)
 	}
 	return &rp, nil
+}
+
+// GetLastfmListeners returns the cached listener count for an artist key.
+// The ok return is false on cache miss (no error). Callers decide whether
+// a stale fetched_at warrants a refetch.
+func (db *PGXStore) GetLastfmListeners(parent context.Context, artistKey string) (int, time.Time, bool, error) {
+	qctx, cancel := context.WithTimeout(parent, DefaultQueryTimeout)
+	defer cancel()
+
+	var listeners int
+	var fetchedAt time.Time
+	err := db.QueryRow(qctx, `SELECT listeners, fetched_at FROM lastfm_cache WHERE artist_key = $1`, artistKey).Scan(&listeners, &fetchedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, time.Time{}, false, nil
+		}
+		return 0, time.Time{}, false, fmt.Errorf("failed to read lastfm cache: %w", err)
+	}
+	return listeners, fetchedAt, true, nil
+}
+
+// UpsertLastfmListeners writes a listener count for an artist key, refreshing
+// fetched_at so the TTL restarts.
+func (db *PGXStore) UpsertLastfmListeners(parent context.Context, artistKey string, listeners int) error {
+	qctx, cancel := context.WithTimeout(parent, DefaultQueryTimeout)
+	defer cancel()
+
+	_, err := db.Exec(qctx, `
+		INSERT INTO lastfm_cache (artist_key, listeners, fetched_at)
+		VALUES ($1, $2, now())
+		ON CONFLICT (artist_key) DO UPDATE
+		SET listeners = EXCLUDED.listeners, fetched_at = now()
+	`, artistKey, listeners)
+	if err != nil {
+		return fmt.Errorf("failed to upsert lastfm cache: %w", err)
+	}
+	return nil
 }
 
 // UpsertRollingPost inserts or updates the rolling digest row keyed by
