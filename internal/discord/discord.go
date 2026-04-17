@@ -182,6 +182,7 @@ func (c *Client) RegisterCommands() error {
 		c.pingCommandConfig(),
 		c.statusCommandConfig(),
 		c.helpCommandConfig(),
+		c.previewCommandConfig(),
 	}
 
 	commandHandlers := make(map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate))

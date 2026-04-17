@@ -34,6 +34,7 @@ type Store interface {
 	GetSubredditByExternalID(ctx context.Context, subreddit string) (*Subreddit, error)
 
 	GetDiscordChannel(ctx context.Context, channelID int) (*DiscordChannel, error)
+	GetDiscordChannelByExternalID(ctx context.Context, channelID string) (*DiscordChannel, error)
 	GetRules(ctx context.Context, subreddit int) ([]*Rule, error)
 	GetRulesByChannel(ctx context.Context, channelExternalID string) ([]*RuleDetail, error)
 	GetRuleByID(ctx context.Context, ruleID int) (*RuleDetail, error)

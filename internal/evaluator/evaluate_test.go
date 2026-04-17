@@ -138,6 +138,9 @@ func (m *mockStore) GetSubredditByExternalID(_ context.Context, _ string) (*dbst
 func (m *mockStore) GetDiscordChannel(_ context.Context, _ int) (*dbstore.DiscordChannel, error) {
 	return &dbstore.DiscordChannel{ID: 1}, nil
 }
+func (m *mockStore) GetDiscordChannelByExternalID(_ context.Context, _ string) (*dbstore.DiscordChannel, error) {
+	return &dbstore.DiscordChannel{ID: 1}, nil
+}
 func (m *mockStore) GetRules(_ context.Context, _ int) ([]*dbstore.Rule, error) {
 	return []*dbstore.Rule{
 		{ID: 1, Target: "test", TargetID: "title", Exact: false, DiscordChannelID: 1},

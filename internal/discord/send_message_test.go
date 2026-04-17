@@ -108,6 +108,14 @@ func (s *fakeStore) InsertPost(_ context.Context, _ string) (*dbstore.Post, erro
 func (s *fakeStore) GetDiscordServerByExternalID(_ context.Context, _ string) (*dbstore.DiscordServer, error) {
 	return nil, nil
 }
+func (s *fakeStore) GetDiscordChannelByExternalID(_ context.Context, extID string) (*dbstore.DiscordChannel, error) {
+	for _, ch := range s.channels {
+		if ch.ExternalID == extID {
+			return ch, nil
+		}
+	}
+	return nil, errors.New("no channel by external id")
+}
 func (s *fakeStore) GetRules(_ context.Context, _ int) ([]*dbstore.Rule, error)    { return nil, nil }
 func (s *fakeStore) GetSubreddits(_ context.Context) ([]*dbstore.Subreddit, error) { return nil, nil }
 func (s *fakeStore) GetRulesByChannel(_ context.Context, _ string) ([]*dbstore.RuleDetail, error) {
