@@ -256,24 +256,29 @@ func (c *Client) SendMessage(ctx ctxpkg.Ctx, result *evaluator.MatchingEvaluatio
 	rp := buildRollingPostRow(existing, result, ch, subreddit, dayLocal, title, summary)
 	embed := buildDigestEmbed(rp, result, subreddit.ExternalID)
 
-	if existing == nil {
+	primaryExisting := ""
+	if existing != nil && len(existing.DiscordMessageIDs) > 0 {
+		primaryExisting = existing.DiscordMessageIDs[0]
+	}
+
+	if primaryExisting == "" {
 		msg, sendErr := c.sender.ChannelMessageSendComplex(ch.ExternalID, &discordgo.MessageSend{
 			Embeds: []*discordgo.MessageEmbed{embed},
 		})
 		if sendErr != nil {
 			return fmt.Errorf("failed to send message: %w", sendErr)
 		}
-		rp.DiscordMessageID = msg.ID
+		rp.DiscordMessageIDs = []string{msg.ID}
 	} else {
 		edited, editErr := c.sender.ChannelMessageEditComplex(&discordgo.MessageEdit{
 			Channel: ch.ExternalID,
-			ID:      existing.DiscordMessageID,
+			ID:      primaryExisting,
 			Embeds:  &[]*discordgo.MessageEmbed{embed},
 		})
 		if isMessageGone(editErr) {
 			_ = level.Warn(ctx.Log()).Log(
 				"msg", "rolling digest message missing, sending a fresh one",
-				"channel", ch.ExternalID, "message_id", existing.DiscordMessageID,
+				"channel", ch.ExternalID, "message_id", primaryExisting,
 			)
 			msg, sendErr := c.sender.ChannelMessageSendComplex(ch.ExternalID, &discordgo.MessageSend{
 				Embeds: []*discordgo.MessageEmbed{embed},
@@ -281,20 +286,17 @@ func (c *Client) SendMessage(ctx ctxpkg.Ctx, result *evaluator.MatchingEvaluatio
 			if sendErr != nil {
 				return fmt.Errorf("fallback send after edit-404 failed: %w", sendErr)
 			}
-			rp.DiscordMessageID = msg.ID
+			rp.DiscordMessageIDs = []string{msg.ID}
 		} else if editErr != nil {
 			return fmt.Errorf("failed to edit rolling digest: %w", editErr)
 		} else {
-			rp.DiscordMessageID = edited.ID
+			rp.DiscordMessageIDs = []string{edited.ID}
 		}
 	}
 
-	if rp.DiscordMessageID == "" {
-		// Defensive: every reachable branch above populates DiscordMessageID.
-		// If this fires, it's a structural bug in SendMessage, not a runtime
-		// failure we can recover from — surface it loudly rather than insert
-		// an empty string and trip the schema CHECK constraint on the next edit.
-		return fmt.Errorf("refusing to upsert rolling_posts with empty discord_message_id (channel=%d, sub=%d, day=%s)",
+	if len(rp.DiscordMessageIDs) == 0 || rp.DiscordMessageIDs[0] == "" {
+		// Defensive: every reachable branch above populates DiscordMessageIDs[0].
+		return fmt.Errorf("refusing to upsert rolling_posts with empty discord_message_ids (channel=%d, sub=%d, day=%s)",
 			rp.ChannelID, rp.SubredditID, rp.DayLocal.Format("2006-01-02"))
 	}
 	if _, err := c.Bot.Store.UpsertRollingPost(ctx, rp); err != nil {
@@ -371,12 +373,16 @@ func buildRollingPostRow(
 		LatestThumbnail:  result.Post.Thumbnail,
 	}
 	if existing != nil {
-		rp.DiscordMessageID = existing.DiscordMessageID
+		rp.DiscordMessageIDs = append([]string(nil), existing.DiscordMessageIDs...)
+		rp.Mode = existing.Mode
 		rp.IncludedPostIDs = appendUnique(existing.IncludedPostIDs, result.Post.ID)
 		rp.IncludedRuleIDs = appendUniqueInt(existing.IncludedRuleIDs, result.RuleID)
 	} else {
 		rp.IncludedPostIDs = []string{result.Post.ID}
 		rp.IncludedRuleIDs = []int{result.RuleID}
+	}
+	if rp.Mode == "" {
+		rp.Mode = "narrative"
 	}
 	return rp
 }

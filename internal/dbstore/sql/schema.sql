@@ -35,8 +35,10 @@ CREATE TABLE IF NOT EXISTS rules (
     exact        BOOLEAN NOT NULL DEFAULT FALSE,
     channel_id   INT  NOT NULL REFERENCES discord_channels(id) ON DELETE CASCADE,
     subreddit_id INT  NOT NULL REFERENCES subreddits(id)       ON DELETE CASCADE,
+    mode         TEXT NOT NULL DEFAULT 'narrative',
     created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE rules ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'narrative';
 CREATE INDEX IF NOT EXISTS rules_subreddit_id_idx ON rules(subreddit_id);
 CREATE INDEX IF NOT EXISTS rules_channel_id_idx   ON rules(channel_id);
 
@@ -59,20 +61,35 @@ CREATE TABLE IF NOT EXISTS notifications (
 -- day is computed in America/Phoenix at match-handling time; all matches from
 -- the same subreddit on the same Phoenix day update the same Discord message.
 CREATE TABLE IF NOT EXISTS rolling_posts (
-    id                 SERIAL PRIMARY KEY,
-    channel_id         INT  NOT NULL REFERENCES discord_channels(id) ON DELETE CASCADE,
-    subreddit_id       INT  NOT NULL REFERENCES subreddits(id)       ON DELETE CASCADE,
-    day_local          DATE NOT NULL,
-    discord_message_id TEXT NOT NULL CHECK (discord_message_id <> ''),
-    narrative_title    TEXT NOT NULL,
-    narrative_summary  TEXT NOT NULL,
-    included_post_ids  TEXT[] NOT NULL DEFAULT '{}',
-    included_rule_ids  INT[]  NOT NULL DEFAULT '{}',
-    latest_score       INT  NOT NULL DEFAULT 0,
-    latest_comments    INT  NOT NULL DEFAULT 0,
-    latest_url         TEXT NOT NULL DEFAULT '',
-    latest_thumbnail   TEXT NOT NULL DEFAULT '',
-    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    id                  SERIAL PRIMARY KEY,
+    channel_id          INT  NOT NULL REFERENCES discord_channels(id) ON DELETE CASCADE,
+    subreddit_id        INT  NOT NULL REFERENCES subreddits(id)       ON DELETE CASCADE,
+    day_local           DATE NOT NULL,
+    mode                TEXT NOT NULL DEFAULT 'narrative',
+    discord_message_id  TEXT NOT NULL DEFAULT '',            -- legacy; use discord_message_ids
+    discord_message_ids TEXT[] NOT NULL DEFAULT '{}',        -- first + any spill messages
+    narrative_title     TEXT NOT NULL DEFAULT '',
+    narrative_summary   TEXT NOT NULL DEFAULT '',
+    entries             JSONB NOT NULL DEFAULT '[]',         -- mode-specific structured payload
+    included_post_ids   TEXT[] NOT NULL DEFAULT '{}',
+    included_rule_ids   INT[]  NOT NULL DEFAULT '{}',
+    latest_score        INT  NOT NULL DEFAULT 0,
+    latest_comments     INT  NOT NULL DEFAULT 0,
+    latest_url          TEXT NOT NULL DEFAULT '',
+    latest_thumbnail    TEXT NOT NULL DEFAULT '',
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (channel_id, subreddit_id, day_local)
 );
+-- Columns added after v2.1 — idempotent for existing deploys.
+ALTER TABLE rolling_posts ADD COLUMN IF NOT EXISTS mode                TEXT   NOT NULL DEFAULT 'narrative';
+ALTER TABLE rolling_posts ADD COLUMN IF NOT EXISTS discord_message_ids TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE rolling_posts ADD COLUMN IF NOT EXISTS entries             JSONB  NOT NULL DEFAULT '[]';
+-- Backfill the new array from the legacy scalar if the array is empty.
+UPDATE rolling_posts
+SET    discord_message_ids = ARRAY[discord_message_id]
+WHERE  discord_message_id <> ''
+  AND  array_length(discord_message_ids, 1) IS NULL;
+-- Drop the legacy 'discord_message_id <> ''' CHECK — the array is now the
+-- authoritative message list; new code writes '' to the scalar column.
+ALTER TABLE rolling_posts DROP CONSTRAINT IF EXISTS rolling_posts_discord_message_id_check;
 CREATE INDEX IF NOT EXISTS rolling_posts_day_idx ON rolling_posts(day_local);

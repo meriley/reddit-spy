@@ -156,6 +156,9 @@ func (m *mockStore) DeleteRule(_ context.Context, _ int) error { return nil }
 func (m *mockStore) UpdateRule(_ context.Context, _ int, _ string, _ bool) error {
 	return nil
 }
+func (m *mockStore) UpdateRuleMode(_ context.Context, _ int, _ string) error {
+	return nil
+}
 func (m *mockStore) GetSubreddits(_ context.Context) ([]*dbstore.Subreddit, error) {
 	return nil, nil
 }

@@ -126,6 +126,7 @@ func (s *fakeStore) GetRuleByID(_ context.Context, _ int) (*dbstore.RuleDetail, 
 }
 func (s *fakeStore) DeleteRule(_ context.Context, _ int) error                   { return nil }
 func (s *fakeStore) UpdateRule(_ context.Context, _ int, _ string, _ bool) error { return nil }
+func (s *fakeStore) UpdateRuleMode(_ context.Context, _ int, _ string) error     { return nil }
 
 // ---------- fake sender ----------
 
@@ -334,8 +335,8 @@ func TestSendMessage_EditFallsBackWhenMessageDeleted(t *testing.T) {
 		t.Fatal("rolling post row missing after fallback")
 		return
 	}
-	if rp.DiscordMessageID != "msg-2" {
-		t.Errorf("DiscordMessageID=%q, want msg-2", rp.DiscordMessageID)
+	if len(rp.DiscordMessageIDs) == 0 || rp.DiscordMessageIDs[0] != "msg-2" {
+		t.Errorf("DiscordMessageIDs=%v, want [msg-2]", rp.DiscordMessageIDs)
 	}
 }
 
