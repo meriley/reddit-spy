@@ -100,14 +100,12 @@ func buildMusicRollingPost(
 	return rp, merged, nil
 }
 
-// renderMusicEmbeds slices the entry list into one or more Discord embeds,
-// respecting per-description rune limits. One embed per message so spill
-// syncing is position-indexed.
+// renderMusicEmbeds groups entries by kind (albums → EPs → singles) and lays
+// them out as compact lines under section headers. One embed per Discord
+// message; the renderer spills into a second/third embed when a single
+// description would exceed the 4000-rune budget.
 func renderMusicEmbeds(rp dbstore.RollingPost, entries []llm.MusicEntry, subredditExternalID string) []*discordgo.MessageEmbed {
-	lines := make([]string, 0, len(entries))
-	for _, e := range entries {
-		lines = append(lines, formatMusicLine(e))
-	}
+	lines := groupAndFormatMusic(entries)
 
 	totalStr := fmt.Sprintf("%d release", len(entries))
 	if len(entries) != 1 {
@@ -133,7 +131,7 @@ func renderMusicEmbeds(rp dbstore.RollingPost, entries []llm.MusicEntry, subredd
 			Title:       truncateUTF8(title, 256),
 			Description: body,
 			Footer: &discordgo.MessageEmbedFooter{
-				Text: fmt.Sprintf("%s today • %s", totalStr, dayStr),
+				Text: fmt.Sprintf("%s • %s", totalStr, dayStr),
 			},
 		}
 		if i == 0 {
@@ -147,15 +145,51 @@ func renderMusicEmbeds(rp dbstore.RollingPost, entries []llm.MusicEntry, subredd
 	return embeds
 }
 
-func formatMusicLine(e llm.MusicEntry) string {
-	suffix := ""
-	switch strings.ToLower(e.Kind) {
-	case "album":
-		suffix = " _(Album)_"
-	case "ep":
-		suffix = " _(EP)_"
+// groupAndFormatMusic sorts entries into album / ep / single buckets (in
+// that order), emits a short header per non-empty bucket, and renders one
+// tight line per entry. Kind isn't repeated on each row — the section header
+// already communicates it.
+func groupAndFormatMusic(entries []llm.MusicEntry) []string {
+	type bucket struct {
+		header string
+		rows   []string
 	}
-	return fmt.Sprintf("• **%s** — %s%s", e.Artist, e.Title, suffix)
+	buckets := []*bucket{
+		{header: "**Albums**"},
+		{header: "**EPs**"},
+		{header: "**Singles**"},
+	}
+	for _, e := range entries {
+		line := formatMusicLineCompact(e)
+		switch strings.ToLower(e.Kind) {
+		case "album":
+			buckets[0].rows = append(buckets[0].rows, line)
+		case "ep":
+			buckets[1].rows = append(buckets[1].rows, line)
+		default:
+			buckets[2].rows = append(buckets[2].rows, line)
+		}
+	}
+
+	var lines []string
+	for _, b := range buckets {
+		if len(b.rows) == 0 {
+			continue
+		}
+		if len(lines) > 0 {
+			lines = append(lines, "") // blank line between sections
+		}
+		lines = append(lines, b.header)
+		lines = append(lines, b.rows...)
+	}
+	return lines
+}
+
+// formatMusicLineCompact renders one entry as "**Artist** – Title" with an
+// en-dash between artist and title. No bullet, no kind suffix (the section
+// header carries that).
+func formatMusicLineCompact(e llm.MusicEntry) string {
+	return fmt.Sprintf("**%s** – %s", e.Artist, e.Title)
 }
 
 // chunkLines groups lines into strings each ≤ maxRunes, newline-separated.
