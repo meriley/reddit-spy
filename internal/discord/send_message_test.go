@@ -79,13 +79,23 @@ func (s *fakeStore) GetSubredditByExternalID(_ context.Context, name string) (*d
 	}
 	return sr, nil
 }
-func (s *fakeStore) GetActiveRollingPost(_ context.Context, channelID, subredditID, windowHours int) (*dbstore.RollingPost, error) {
+func (s *fakeStore) GetActiveRollingPost(_ context.Context, channelID int, mode string, windowHours int) (*dbstore.RollingPost, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if mode == "" {
+		mode = dbstore.ModeNarrative
+	}
 	now := s.now()
 	var latest *dbstore.RollingPost
 	for _, rp := range s.rolling {
-		if rp.ChannelID != channelID || rp.SubredditID != subredditID {
+		if rp.ChannelID != channelID {
+			continue
+		}
+		rpMode := rp.Mode
+		if rpMode == "" {
+			rpMode = dbstore.ModeNarrative
+		}
+		if rpMode != mode {
 			continue
 		}
 		closesAt := rp.WindowStart.Add(time.Duration(windowHours) * time.Hour)
@@ -404,7 +414,7 @@ func TestSendMessage_EditFallsBackWhenMessageDeleted(t *testing.T) {
 		t.Errorf("sendCalls=%d, want 2 (fresh + fallback)", sender.sendCalls)
 	}
 	// After fallback, stored message_id should point at the replacement.
-	rp, _ := store.GetActiveRollingPost(context.Background(), 1, 10, 72)
+	rp, _ := store.GetActiveRollingPost(context.Background(), 1, dbstore.ModeNarrative, 72)
 	if rp == nil {
 		t.Fatal("rolling post row missing after fallback")
 		return
@@ -467,7 +477,7 @@ func TestSendMessage_WindowBoundary_CrossingClockMidnight(t *testing.T) {
 
 	// Still exactly one rolling_post row for this (channel, sub) in the
 	// default 72h window.
-	rp, _ := store.GetActiveRollingPost(context.Background(), 1, 10, 72)
+	rp, _ := store.GetActiveRollingPost(context.Background(), 1, dbstore.ModeNarrative, 72)
 	if rp == nil {
 		t.Fatal("expected a rolling_posts row for the active 72h window")
 		return

@@ -55,7 +55,6 @@ func buildMusicRollingPost(
 ) (dbstore.RollingPost, []llm.MusicEntry, error) {
 	rp := dbstore.RollingPost{
 		ChannelID:       result.ChannelID,
-		SubredditID:     subreddit.ID,
 		DayLocal:        dayLocal,
 		Mode:            dbstore.ModeMusic,
 		LatestScore:     result.Post.Score,
@@ -76,10 +75,14 @@ func buildMusicRollingPost(
 		rp.ID = existing.ID
 		rp.WindowStart = existing.WindowStart
 		rp.DayLocal = existing.DayLocal
+		rp.SubredditID = existing.SubredditID // opening sub stays for display
+		rp.SubredditIDs = appendUniqueInt(existing.SubredditIDs, subreddit.ID)
 		rp.DiscordMessageIDs = append([]string(nil), existing.DiscordMessageIDs...)
 		rp.IncludedPostIDs = appendUnique(existing.IncludedPostIDs, result.Post.ID)
 		rp.IncludedRuleIDs = appendUniqueInt(existing.IncludedRuleIDs, result.RuleID)
 	} else {
+		rp.SubredditID = subreddit.ID
+		rp.SubredditIDs = []int{subreddit.ID}
 		rp.IncludedPostIDs = []string{result.Post.ID}
 		rp.IncludedRuleIDs = []int{result.RuleID}
 	}
@@ -110,7 +113,7 @@ func buildMusicRollingPost(
 // them out as compact lines under section headers. One embed per Discord
 // message; the renderer spills into a second/third embed when a single
 // description would exceed the 4000-rune budget.
-func renderMusicEmbeds(rp dbstore.RollingPost, entries []llm.MusicEntry, subredditExternalID string) []*discordgo.MessageEmbed {
+func renderMusicEmbeds(rp dbstore.RollingPost, entries []llm.MusicEntry, subredditNames []string) []*discordgo.MessageEmbed {
 	lines := groupAndFormatMusic(entries)
 
 	totalStr := fmt.Sprintf("%d release", len(entries))
@@ -118,7 +121,14 @@ func renderMusicEmbeds(rp dbstore.RollingPost, entries []llm.MusicEntry, subredd
 		totalStr = fmt.Sprintf("%d releases", len(entries))
 	}
 	dayStr := rp.DayLocal.Format("2006-01-02")
-	headerTitle := fmt.Sprintf("r/%s — music digest", subredditExternalID)
+
+	// Header: every contributing subreddit, joined. Falls back to just
+	// "music digest" when we can't resolve any names (defensive; normally
+	// at least one sub is always present).
+	subsHeader := "music digest"
+	if joined := joinSubNames(subredditNames); joined != "" {
+		subsHeader = joined + " — music digest"
+	}
 
 	chunks := chunkLines(lines, maxDescRunes)
 	if len(chunks) == 0 {
@@ -127,9 +137,9 @@ func renderMusicEmbeds(rp dbstore.RollingPost, entries []llm.MusicEntry, subredd
 
 	embeds := make([]*discordgo.MessageEmbed, 0, len(chunks))
 	for i, body := range chunks {
-		title := headerTitle
+		title := subsHeader
 		if len(chunks) > 1 {
-			title = fmt.Sprintf("%s (%d/%d)", headerTitle, i+1, len(chunks))
+			title = fmt.Sprintf("%s (%d/%d)", subsHeader, i+1, len(chunks))
 		}
 		e := &discordgo.MessageEmbed{
 			Type:        discordgo.EmbedTypeRich,
@@ -142,13 +152,54 @@ func renderMusicEmbeds(rp dbstore.RollingPost, entries []llm.MusicEntry, subredd
 		}
 		if i == 0 {
 			e.URL = rp.LatestURL
-			e.Author = &discordgo.MessageEmbedAuthor{
-				Name: fmt.Sprintf("r/%s", subredditExternalID),
-			}
+			e.Author = &discordgo.MessageEmbedAuthor{Name: subsHeader}
 		}
 		embeds = append(embeds, e)
 	}
 	return embeds
+}
+
+// resolveSubredditNames maps a slice of internal subreddit IDs to their
+// external names, preserving input order. Unknown IDs are silently dropped
+// (renderer degrades to "music digest" rather than blowing up). One DB
+// round-trip per call via GetSubreddits; subreddit cardinality is tiny
+// (a handful of subs per channel) so the full-list scan is fine.
+func (c *Client) resolveSubredditNames(ctx ctxpkg.Ctx, ids []int) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	subs, err := c.Bot.Store.GetSubreddits(ctx)
+	if err != nil {
+		_ = level.Warn(ctx.Log()).Log("msg", "resolve subreddit names failed; falling back to generic header", "error", err)
+		return nil
+	}
+	byID := make(map[int]string, len(subs))
+	for _, s := range subs {
+		byID[s.ID] = s.ExternalID
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if name, ok := byID[id]; ok && name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// joinSubNames turns a slice of subreddit external IDs into "r/a, r/b, r/c".
+// Empty input returns empty string. Blank entries are skipped.
+func joinSubNames(names []string) string {
+	parts := make([]string, 0, len(names))
+	for _, n := range names {
+		if n == "" {
+			continue
+		}
+		parts = append(parts, "r/"+n)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, ", ")
 }
 
 // groupAndFormatMusic sorts entries into album / ep / single buckets (in
@@ -348,7 +399,8 @@ func (c *Client) handleMusicMatch(
 		rp.Entries = enriched
 	}
 
-	embeds := renderMusicEmbeds(rp, merged, subreddit.ExternalID)
+	subNames := c.resolveSubredditNames(ctx, rp.SubredditIDs)
+	embeds := renderMusicEmbeds(rp, merged, subNames)
 
 	var priorIDs []string
 	if existing != nil {

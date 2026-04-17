@@ -185,7 +185,7 @@ func (m *mockStore) GetSubreddits(_ context.Context) ([]*dbstore.Subreddit, erro
 func (m *mockStore) GetNotificationCount(_ context.Context, _, _, _ int) (int, error) {
 	return 0, nil
 }
-func (m *mockStore) GetActiveRollingPost(_ context.Context, _, _, _ int) (*dbstore.RollingPost, error) {
+func (m *mockStore) GetActiveRollingPost(_ context.Context, _ int, _ string, _ int) (*dbstore.RollingPost, error) {
 	return nil, nil
 }
 func (m *mockStore) UpsertRollingPost(_ context.Context, _ dbstore.RollingPost) (*dbstore.RollingPost, error) {

@@ -298,8 +298,15 @@ func (c *Client) SendMessage(ctx ctxpkg.Ctx, result *evaluator.MatchingEvaluatio
 		return fmt.Errorf("failed to get subreddit %q: %w", result.Post.Subreddit, err)
 	}
 
+	// Digest bucket is (channel, mode) — all rules of the same mode in a
+	// channel share one rolling digest. r/metalcore + r/poppunkers music
+	// rules collapse into one music digest per channel.
+	mode := dbstore.ModeNarrative
+	if result.Rule != nil && result.Rule.Mode != "" {
+		mode = result.Rule.Mode
+	}
 	windowHours := effectiveWindowHours(result.Rule, c.defaultWindowHours)
-	existing, err := c.Bot.Store.GetActiveRollingPost(ctx, result.ChannelID, subreddit.ID, windowHours)
+	existing, err := c.Bot.Store.GetActiveRollingPost(ctx, result.ChannelID, mode, windowHours)
 	if err != nil {
 		return fmt.Errorf("failed to fetch active rolling post: %w", err)
 	}
@@ -315,13 +322,7 @@ func (c *Client) SendMessage(ctx ctxpkg.Ctx, result *evaluator.MatchingEvaluatio
 		dayLocal = time.Date(phoenix.Year(), phoenix.Month(), phoenix.Day(), 0, 0, 0, 0, time.UTC)
 	}
 
-	// Dispatch by rule.Mode. Unrecognised modes (or legacy nil) fall through
-	// to narrative so an operator who sets the column directly to something
-	// weird still gets output.
-	mode := dbstore.ModeNarrative
-	if result.Rule != nil && result.Rule.Mode != "" {
-		mode = result.Rule.Mode
-	}
+	// Dispatch by rule.Mode (already resolved above for the active-row lookup).
 	switch mode {
 	case dbstore.ModeMusic:
 		return c.handleMusicMatch(ctx, existing, result, ch, subreddit, dayLocal)
@@ -464,11 +465,15 @@ func buildRollingPostRow(
 		rp.ID = existing.ID
 		rp.WindowStart = existing.WindowStart
 		rp.DayLocal = existing.DayLocal
+		rp.SubredditID = existing.SubredditID // opening sub stays for display
+		rp.SubredditIDs = appendUniqueInt(existing.SubredditIDs, subreddit.ID)
 		rp.DiscordMessageIDs = append([]string(nil), existing.DiscordMessageIDs...)
 		rp.Mode = existing.Mode
 		rp.IncludedPostIDs = appendUnique(existing.IncludedPostIDs, result.Post.ID)
 		rp.IncludedRuleIDs = appendUniqueInt(existing.IncludedRuleIDs, result.RuleID)
 	} else {
+		rp.SubredditID = subreddit.ID
+		rp.SubredditIDs = []int{subreddit.ID}
 		rp.IncludedPostIDs = []string{result.Post.ID}
 		rp.IncludedRuleIDs = []int{result.RuleID}
 	}

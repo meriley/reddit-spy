@@ -45,7 +45,7 @@ type Store interface {
 	GetSubreddits(ctx context.Context) ([]*Subreddit, error)
 	GetNotificationCount(ctx context.Context, postID, channelID, ruleID int) (int, error)
 
-	GetActiveRollingPost(ctx context.Context, channelID, subredditID int, windowHours int) (*RollingPost, error)
+	GetActiveRollingPost(ctx context.Context, channelID int, mode string, windowHours int) (*RollingPost, error)
 	UpsertRollingPost(ctx context.Context, rp RollingPost) (*RollingPost, error)
 
 	GetLastfmListeners(ctx context.Context, artistKey string) (listeners int, fetchedAt time.Time, ok bool, err error)
@@ -577,10 +577,11 @@ func (db *PGXStore) UpdateRule(ctx context.Context, ruleID int, target string, e
 type RollingPost struct {
 	ID                int
 	ChannelID         int
-	SubredditID       int
+	SubredditID       int       // legacy — the digest's opening subreddit; kept for display
+	SubredditIDs      []int     // every subreddit that has contributed to this digest
 	DayLocal          time.Time // display only; rendered in the footer
-	WindowStart       time.Time // when the digest opened; bucket key in combination with rules.window_hours
-	Mode              string    // narrative | music | summary | media
+	WindowStart       time.Time // when the digest opened; bucket key with rules.window_hours
+	Mode              string    // narrative | music | summary | media — bucket dimension
 	DiscordMessageIDs []string
 	NarrativeTitle    string
 	NarrativeSummary  string
@@ -595,16 +596,24 @@ type RollingPost struct {
 }
 
 // GetActiveRollingPost returns the most recent rolling digest for (channel,
-// subreddit) whose `window_start + windowHours` hasn't elapsed. Returns
-// (nil, nil) when no such row exists — the caller opens a fresh one.
+// mode) whose `window_start + windowHours` hasn't elapsed. The digest is
+// bucketed by channel + mode, not subreddit — all music rules targeting the
+// same channel share one digest, regardless of which subreddit the match
+// came from. Returns (nil, nil) when no such row exists.
 //
 // windowHours must be > 0; callers guard against 0 before calling.
-func (db *PGXStore) GetActiveRollingPost(parent context.Context, channelID, subredditID int, windowHours int) (*RollingPost, error) {
+func (db *PGXStore) GetActiveRollingPost(parent context.Context, channelID int, mode string, windowHours int) (*RollingPost, error) {
 	qctx, cancel := context.WithTimeout(parent, DefaultQueryTimeout)
 	defer cancel()
+	if mode == "" {
+		mode = ModeNarrative
+	}
 
 	query := `
-		SELECT id, channel_id, subreddit_id, day_local, window_start,
+		SELECT id, channel_id,
+		       COALESCE(subreddit_id, 0),
+		       COALESCE(subreddit_ids, '{}'::int[]),
+		       day_local, window_start,
 		       COALESCE(mode, 'narrative'),
 		       COALESCE(discord_message_ids, '{}'::text[]),
 		       narrative_title, narrative_summary,
@@ -614,14 +623,16 @@ func (db *PGXStore) GetActiveRollingPost(parent context.Context, channelID, subr
 		       latest_thumbnail, updated_at
 		FROM rolling_posts
 		WHERE channel_id = $1
-		  AND subreddit_id = $2
+		  AND COALESCE(mode, 'narrative') = $2
 		  AND window_start + make_interval(hours => $3) > now()
 		ORDER BY window_start DESC
 		LIMIT 1
 	`
 	var rp RollingPost
-	err := db.QueryRow(qctx, query, channelID, subredditID, windowHours).Scan(
-		&rp.ID, &rp.ChannelID, &rp.SubredditID, &rp.DayLocal, &rp.WindowStart,
+	err := db.QueryRow(qctx, query, channelID, mode, windowHours).Scan(
+		&rp.ID, &rp.ChannelID,
+		&rp.SubredditID, &rp.SubredditIDs,
+		&rp.DayLocal, &rp.WindowStart,
 		&rp.Mode, &rp.DiscordMessageIDs,
 		&rp.NarrativeTitle, &rp.NarrativeSummary, &rp.Entries,
 		&rp.IncludedPostIDs, &rp.IncludedRuleIDs,
@@ -810,7 +821,10 @@ func (db *PGXStore) UpsertRollingPost(parent context.Context, rp RollingPost) (*
 	}
 
 	const selectCols = `
-		id, channel_id, subreddit_id, day_local, window_start,
+		id, channel_id,
+		COALESCE(subreddit_id, 0),
+		COALESCE(subreddit_ids, '{}'::int[]),
+		day_local, window_start,
 		COALESCE(mode, 'narrative'),
 		COALESCE(discord_message_ids, '{}'::text[]),
 		narrative_title, narrative_summary,
@@ -826,6 +840,11 @@ func (db *PGXStore) UpsertRollingPost(parent context.Context, rp RollingPost) (*
 		}
 	)
 
+	subredditIDs := rp.SubredditIDs
+	if subredditIDs == nil {
+		subredditIDs = []int{}
+	}
+
 	if rp.ID == 0 {
 		// Fresh insert — stamp window_start if caller left it zero.
 		windowStart := rp.WindowStart
@@ -834,16 +853,18 @@ func (db *PGXStore) UpsertRollingPost(parent context.Context, rp RollingPost) (*
 		}
 		query := `
 			INSERT INTO rolling_posts (
-				channel_id, subreddit_id, day_local, window_start,
+				channel_id, subreddit_id, subreddit_ids,
+				day_local, window_start,
 				mode, discord_message_ids,
 				narrative_title, narrative_summary, entries,
 				included_post_ids, included_rule_ids,
 				latest_score, latest_comments, latest_url,
 				latest_thumbnail, updated_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now())
 			RETURNING ` + selectCols
 		row = db.QueryRow(qctx, query,
-			rp.ChannelID, rp.SubredditID, rp.DayLocal, windowStart,
+			rp.ChannelID, rp.SubredditID, subredditIDs,
+			rp.DayLocal, windowStart,
 			rp.Mode, rp.DiscordMessageIDs,
 			rp.NarrativeTitle, rp.NarrativeSummary, entries,
 			rp.IncludedPostIDs, rp.IncludedRuleIDs,
@@ -851,26 +872,29 @@ func (db *PGXStore) UpsertRollingPost(parent context.Context, rp RollingPost) (*
 			rp.LatestThumbnail,
 		)
 	} else {
-		// Update by id. window_start + day_local stay as they were — the
-		// digest's identity is fixed at opening time.
+		// Update by id. window_start + day_local + subreddit_id (opening sub)
+		// stay as they were — the digest's identity is fixed at opening time.
+		// subreddit_ids accumulates contributing subs.
 		query := `
 			UPDATE rolling_posts SET
-				mode                = $2,
-				discord_message_ids = $3,
-				narrative_title     = $4,
-				narrative_summary   = $5,
-				entries             = $6,
-				included_post_ids   = $7,
-				included_rule_ids   = $8,
-				latest_score        = $9,
-				latest_comments     = $10,
-				latest_url          = $11,
-				latest_thumbnail    = $12,
+				subreddit_ids       = $2,
+				mode                = $3,
+				discord_message_ids = $4,
+				narrative_title     = $5,
+				narrative_summary   = $6,
+				entries             = $7,
+				included_post_ids   = $8,
+				included_rule_ids   = $9,
+				latest_score        = $10,
+				latest_comments     = $11,
+				latest_url          = $12,
+				latest_thumbnail    = $13,
 				updated_at          = now()
 			WHERE id = $1
 			RETURNING ` + selectCols
 		row = db.QueryRow(qctx, query,
 			rp.ID,
+			subredditIDs,
 			rp.Mode, rp.DiscordMessageIDs,
 			rp.NarrativeTitle, rp.NarrativeSummary, entries,
 			rp.IncludedPostIDs, rp.IncludedRuleIDs,
@@ -880,7 +904,8 @@ func (db *PGXStore) UpsertRollingPost(parent context.Context, rp RollingPost) (*
 	}
 
 	if err := row.Scan(
-		&out.ID, &out.ChannelID, &out.SubredditID, &out.DayLocal, &out.WindowStart,
+		&out.ID, &out.ChannelID, &out.SubredditID, &out.SubredditIDs,
+		&out.DayLocal, &out.WindowStart,
 		&out.Mode, &out.DiscordMessageIDs,
 		&out.NarrativeTitle, &out.NarrativeSummary, &out.Entries,
 		&out.IncludedPostIDs, &out.IncludedRuleIDs,

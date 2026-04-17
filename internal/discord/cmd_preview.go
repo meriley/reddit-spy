@@ -159,7 +159,13 @@ func (c *Client) buildPreview(ctx ctxpkg.Ctx, channelExternalID, urlOrID string)
 	if windowHours <= 0 {
 		windowHours = 72
 	}
-	existing, err := c.Bot.Store.GetActiveRollingPost(ctx, ch.ID, subreddit.ID, windowHours)
+
+	mode := rule.Mode
+	if mode == "" {
+		mode = dbstore.ModeNarrative
+	}
+
+	existing, err := c.Bot.Store.GetActiveRollingPost(ctx, ch.ID, mode, windowHours)
 	if err != nil {
 		return nil, "", fmt.Errorf("active rolling-post lookup: %w", err)
 	}
@@ -170,11 +176,6 @@ func (c *Client) buildPreview(ctx ctxpkg.Ctx, channelExternalID, urlOrID string)
 	} else {
 		phoenix := c.now().In(c.loc)
 		dayLocal = time.Date(phoenix.Year(), phoenix.Month(), phoenix.Day(), 0, 0, 0, 0, time.UTC)
-	}
-
-	mode := rule.Mode
-	if mode == "" {
-		mode = dbstore.ModeNarrative
 	}
 
 	fakeResult := &evaluator.MatchingEvaluationResult{
@@ -263,7 +264,8 @@ func (c *Client) previewMusic(
 	}
 	merged = mergeListeners(merged, known)
 	merged = c.enrichMusicAll(ctx, merged)
-	embeds := renderMusicEmbeds(rp, merged, subreddit.ExternalID)
+	subNames := c.resolveSubredditNames(ctx, rp.SubredditIDs)
+	embeds := renderMusicEmbeds(rp, merged, subNames)
 	// Caller sends one followup per embed — same trick the live post uses.
 	notice := fmt.Sprintf(
 		":microscope: **Preview (music)** — %d new release(s) extracted, %d total in the simulated digest "+

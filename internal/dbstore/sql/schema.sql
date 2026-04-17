@@ -89,6 +89,20 @@ ALTER TABLE rolling_posts ADD COLUMN IF NOT EXISTS mode                TEXT     
 ALTER TABLE rolling_posts ADD COLUMN IF NOT EXISTS discord_message_ids TEXT[]      NOT NULL DEFAULT '{}';
 ALTER TABLE rolling_posts ADD COLUMN IF NOT EXISTS entries             JSONB       NOT NULL DEFAULT '[]';
 ALTER TABLE rolling_posts ADD COLUMN IF NOT EXISTS window_start        TIMESTAMPTZ NOT NULL DEFAULT now();
+-- subreddit_ids: tracks every subreddit that has contributed to this digest.
+-- Backfilled from the (legacy) scalar subreddit_id so existing open digests
+-- keep their provenance. Lookup no longer keys on subreddit — see
+-- rolling_posts_active_by_mode_idx — so one music-mode digest per channel
+-- can collect matches from r/metalcore + r/poppunkers + … into one message.
+ALTER TABLE rolling_posts ADD COLUMN IF NOT EXISTS subreddit_ids INT[] NOT NULL DEFAULT '{}';
+UPDATE rolling_posts
+SET    subreddit_ids = ARRAY[subreddit_id]
+WHERE  subreddit_id IS NOT NULL
+  AND  array_length(subreddit_ids, 1) IS NULL;
+-- The legacy scalar subreddit_id was NOT NULL with a FK. Drop the NOT NULL
+-- so new rows can omit it — we still populate it with the first contributing
+-- sub for back-compat, but the digest key is (channel, mode, window_start).
+ALTER TABLE rolling_posts ALTER COLUMN subreddit_id DROP NOT NULL;
 -- Backfill window_start for pre-window rows to approximate their original
 -- Phoenix-midnight start (day_local 00:00 MST ≈ 07:00 UTC). Only touches rows
 -- whose window_start was just defaulted by the ALTER (i.e. within the last
@@ -115,9 +129,10 @@ ALTER TABLE rolling_posts DROP CONSTRAINT IF EXISTS rolling_posts_discord_messag
 ALTER TABLE rolling_posts ALTER COLUMN discord_message_id DROP NOT NULL;
 ALTER TABLE rolling_posts ALTER COLUMN discord_message_id SET DEFAULT '';
 CREATE INDEX IF NOT EXISTS rolling_posts_day_idx ON rolling_posts(day_local);
--- Optimises the "latest active digest for (channel, sub)" lookup path.
-CREATE INDEX IF NOT EXISTS rolling_posts_active_idx
-  ON rolling_posts (channel_id, subreddit_id, window_start DESC);
+-- Optimises the "latest active digest for (channel, mode)" lookup path.
+DROP INDEX IF EXISTS rolling_posts_active_idx;
+CREATE INDEX IF NOT EXISTS rolling_posts_active_by_mode_idx
+  ON rolling_posts (channel_id, mode, window_start DESC);
 
 -- Last.fm listener-count + tags cache. artist_key is the normalized artist
 -- name (case-folded, single-spaced, trimmed). Stale rows (> 30 days) get
