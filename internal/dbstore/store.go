@@ -49,6 +49,8 @@ type Store interface {
 
 	GetLastfmListeners(ctx context.Context, artistKey string) (listeners int, fetchedAt time.Time, ok bool, err error)
 	UpsertLastfmListeners(ctx context.Context, artistKey string, listeners int) error
+	GetLastfmArtist(ctx context.Context, artistKey string) (listeners int, tags []string, fetchedAt time.Time, ok bool, err error)
+	UpsertLastfmArtist(ctx context.Context, artistKey string, listeners int, tags []string) error
 }
 
 type PGXStore struct {
@@ -620,6 +622,46 @@ func (db *PGXStore) UpsertLastfmListeners(parent context.Context, artistKey stri
 	`, artistKey, listeners)
 	if err != nil {
 		return fmt.Errorf("failed to upsert lastfm cache: %w", err)
+	}
+	return nil
+}
+
+// GetLastfmArtist returns cached listeners + tags together.
+func (db *PGXStore) GetLastfmArtist(parent context.Context, artistKey string) (int, []string, time.Time, bool, error) {
+	qctx, cancel := context.WithTimeout(parent, DefaultQueryTimeout)
+	defer cancel()
+
+	var listeners int
+	var tags []string
+	var fetchedAt time.Time
+	err := db.QueryRow(qctx, `SELECT listeners, COALESCE(tags, '{}'::text[]), fetched_at FROM lastfm_cache WHERE artist_key = $1`, artistKey).
+		Scan(&listeners, &tags, &fetchedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, nil, time.Time{}, false, nil
+		}
+		return 0, nil, time.Time{}, false, fmt.Errorf("failed to read lastfm cache: %w", err)
+	}
+	return listeners, tags, fetchedAt, true, nil
+}
+
+// UpsertLastfmArtist writes listeners + tags together, refreshing fetched_at.
+func (db *PGXStore) UpsertLastfmArtist(parent context.Context, artistKey string, listeners int, tags []string) error {
+	qctx, cancel := context.WithTimeout(parent, DefaultQueryTimeout)
+	defer cancel()
+	if tags == nil {
+		tags = []string{}
+	}
+	_, err := db.Exec(qctx, `
+		INSERT INTO lastfm_cache (artist_key, listeners, tags, fetched_at)
+		VALUES ($1, $2, $3, now())
+		ON CONFLICT (artist_key) DO UPDATE
+		SET listeners = EXCLUDED.listeners,
+		    tags      = EXCLUDED.tags,
+		    fetched_at = now()
+	`, artistKey, listeners, tags)
+	if err != nil {
+		return fmt.Errorf("failed to upsert lastfm artist cache: %w", err)
 	}
 	return nil
 }

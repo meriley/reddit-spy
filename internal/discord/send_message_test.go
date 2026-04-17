@@ -131,6 +131,12 @@ func (s *fakeStore) GetLastfmListeners(_ context.Context, _ string) (int, time.T
 	return 0, time.Time{}, false, nil
 }
 func (s *fakeStore) UpsertLastfmListeners(_ context.Context, _ string, _ int) error { return nil }
+func (s *fakeStore) GetLastfmArtist(_ context.Context, _ string) (int, []string, time.Time, bool, error) {
+	return 0, nil, time.Time{}, false, nil
+}
+func (s *fakeStore) UpsertLastfmArtist(_ context.Context, _ string, _ int, _ []string) error {
+	return nil
+}
 
 // ---------- fake sender ----------
 

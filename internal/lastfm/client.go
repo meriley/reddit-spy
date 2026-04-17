@@ -24,6 +24,18 @@ const DefaultTimeout = 5 * time.Second
 // ErrNotFound is returned when Last.fm has no page for the supplied artist.
 var ErrNotFound = errors.New("lastfm: artist not found")
 
+// ArtistInfo carries the subset of Last.fm artist-page signals the digest
+// uses. Listeners is the Last.fm monthly-listener count. Tags is a short
+// genre list taken from the page's "Related Tags" block (most-voted first,
+// up to MaxTags entries).
+type ArtistInfo struct {
+	Listeners int
+	Tags      []string
+}
+
+// MaxTags caps how many tags we store per artist.
+const MaxTags = 3
+
 type Client struct {
 	http *http.Client
 	ua   string
@@ -49,36 +61,42 @@ func ArtistKey(raw string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-// LookupListeners fetches the listener count for a single artist. Returns
-// ErrNotFound on HTTP 404. Any other failure (network, unexpected HTML shape,
-// context deadline) returns a non-nil error; callers should not cache those
-// outcomes as a zero-listener hit.
-//
-// Retries on transient upstream failures (502/503/504) with short exponential
-// backoff — Last.fm throws 502s under moderate burst load, and a single retry
-// usually recovers.
+// LookupListeners is a thin convenience wrapper around LookupArtist for
+// callers that only care about the listener count.
 func (c *Client) LookupListeners(ctx context.Context, artist string) (int, error) {
+	info, err := c.LookupArtist(ctx, artist)
+	if err != nil {
+		return 0, err
+	}
+	return info.Listeners, nil
+}
+
+// LookupArtist fetches listener count + tags for a single artist. Returns
+// ErrNotFound on HTTP 404. Retries on transient upstream failures (502/503/
+// 504) with short exponential backoff — Last.fm throws 502s under moderate
+// burst load, and a single retry usually recovers.
+func (c *Client) LookupArtist(ctx context.Context, artist string) (ArtistInfo, error) {
 	key := ArtistKey(artist)
 	if key == "" {
-		return 0, errors.New("lastfm: empty artist")
+		return ArtistInfo{}, errors.New("lastfm: empty artist")
 	}
 	slug := strings.ReplaceAll(url.QueryEscape(artist), "%20", "+")
 	endpoint := "https://www.last.fm/music/" + slug
 
 	backoffs := []time.Duration{0, 300 * time.Millisecond, 900 * time.Millisecond}
 	var lastErr error
-	for attempt, delay := range backoffs {
+	for _, delay := range backoffs {
 		if delay > 0 {
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():
-				return 0, ctx.Err()
+				return ArtistInfo{}, ctx.Err()
 			}
 		}
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 		if err != nil {
-			return 0, err
+			return ArtistInfo{}, err
 		}
 		req.Header.Set("User-Agent", c.ua)
 		req.Header.Set("Accept", "text/html,application/xhtml+xml")
@@ -92,7 +110,7 @@ func (c *Client) LookupListeners(ctx context.Context, artist string) (int, error
 
 		if resp.StatusCode == http.StatusNotFound {
 			_ = resp.Body.Close()
-			return 0, ErrNotFound
+			return ArtistInfo{}, ErrNotFound
 		}
 		if resp.StatusCode == http.StatusBadGateway ||
 			resp.StatusCode == http.StatusServiceUnavailable ||
@@ -103,7 +121,7 @@ func (c *Client) LookupListeners(ctx context.Context, artist string) (int, error
 		}
 		if resp.StatusCode != http.StatusOK {
 			_ = resp.Body.Close()
-			return 0, fmt.Errorf("lastfm: HTTP %d for %q", resp.StatusCode, endpoint)
+			return ArtistInfo{}, fmt.Errorf("lastfm: HTTP %d for %q", resp.StatusCode, endpoint)
 		}
 
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -113,17 +131,47 @@ func (c *Client) LookupListeners(ctx context.Context, artist string) (int, error
 			continue
 		}
 
-		n, perr := extractListeners(string(body))
+		html := string(body)
+		n, perr := extractListeners(html)
 		if perr != nil {
-			return 0, perr
+			return ArtistInfo{}, perr
 		}
-		_ = attempt
-		return n, nil
+		return ArtistInfo{Listeners: n, Tags: extractTags(html, MaxTags)}, nil
 	}
 	if lastErr == nil {
 		lastErr = errors.New("lastfm: all retries exhausted")
 	}
-	return 0, lastErr
+	return ArtistInfo{}, lastErr
+}
+
+// tagsBlockRe captures the outer <ul class="tags-list..."> block. The
+// extractor then pulls each <a>tagname</a> out of it in display order
+// (which is Last.fm's vote-weighted ordering).
+var tagsBlockRe = regexp.MustCompile(`(?s)<ul\s+class="[^"]*tags-list[^"]*"\s*>(.*?)</ul>`)
+var tagAnchorRe = regexp.MustCompile(`(?s)<a[^>]*href="/tag/[^"]+"[^>]*>\s*([^<]+?)\s*</a>`)
+
+// extractTags returns up to maxTags lowercase tags from the artist page's
+// "Related Tags" block. Returns nil (not an error) if no tags block is
+// found — tags are advisory; the digest still works without them.
+func extractTags(html string, maxTags int) []string {
+	m := tagsBlockRe.FindStringSubmatch(html)
+	if m == nil {
+		return nil
+	}
+	block := m[1]
+	anchors := tagAnchorRe.FindAllStringSubmatch(block, -1)
+	out := make([]string, 0, maxTags)
+	for _, a := range anchors {
+		tag := strings.ToLower(strings.TrimSpace(a[1]))
+		if tag == "" {
+			continue
+		}
+		out = append(out, tag)
+		if len(out) >= maxTags {
+			break
+		}
+	}
+	return out
 }
 
 // extractListeners finds the listener count in a Last.fm artist page. The

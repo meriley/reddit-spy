@@ -206,11 +206,20 @@ func sortByPopularity(entries []llm.MusicEntry) {
 	})
 }
 
-// formatMusicLineCompact renders one entry as "**Artist** – Title" with an
-// en-dash between artist and title. No bullet, no kind suffix (the section
-// header carries that).
+// formatMusicLineCompact renders one entry as "**Artist** – Title `tag1, tag2`"
+// where the trailing backticked tags come from Last.fm and are omitted if
+// absent. No bullet, no kind suffix (the section header carries that).
 func formatMusicLineCompact(e llm.MusicEntry) string {
-	return fmt.Sprintf("**%s** – %s", e.Artist, e.Title)
+	base := fmt.Sprintf("**%s** – %s", e.Artist, e.Title)
+	if len(e.Tags) == 0 {
+		return base
+	}
+	// Cap at 2 tags for compactness regardless of how many we cached.
+	top := e.Tags
+	if len(top) > 2 {
+		top = top[:2]
+	}
+	return fmt.Sprintf("%s `%s`", base, strings.Join(top, ", "))
 }
 
 // chunkLines groups lines into strings each ≤ maxRunes, newline-separated.

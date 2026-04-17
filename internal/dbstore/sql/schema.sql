@@ -94,11 +94,13 @@ WHERE  discord_message_id <> ''
 ALTER TABLE rolling_posts DROP CONSTRAINT IF EXISTS rolling_posts_discord_message_id_check;
 CREATE INDEX IF NOT EXISTS rolling_posts_day_idx ON rolling_posts(day_local);
 
--- Last.fm listener-count cache. artist_key is the normalized artist name
--- (case-folded, single-spaced, trimmed). Stale rows (> 30 days) get
+-- Last.fm listener-count + tags cache. artist_key is the normalized artist
+-- name (case-folded, single-spaced, trimmed). Stale rows (> 30 days) get
 -- overwritten lazily on the next lookup.
 CREATE TABLE IF NOT EXISTS lastfm_cache (
     artist_key TEXT        PRIMARY KEY,
     listeners  INT         NOT NULL DEFAULT 0,
+    tags       TEXT[]      NOT NULL DEFAULT '{}',
     fetched_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE lastfm_cache ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';

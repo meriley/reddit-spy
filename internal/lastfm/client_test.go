@@ -76,6 +76,36 @@ func TestExtractListeners_NoMatch(t *testing.T) {
 	}
 }
 
+func TestExtractTags(t *testing.T) {
+	html := `
+<section class="catalogue-tags ">
+	<h2 class="sr-only">Related Tags</h2>
+	<ul class="tags-list tags-list--global">
+		<li class="tag"><a href="/tag/metalcore">metalcore</a></li>
+		<li class="tag"><a href="/tag/trancecore">trancecore</a></li>
+		<li class="tag"><a href="/tag/german">german</a></li>
+		<li class="tag"><a href="/tag/electronic">electronic</a></li>
+		<li class="tag"><a href="/tag/electronicore">electronicore</a></li>
+	</ul>
+</section>`
+	got := extractTags(html, 3)
+	want := []string{"metalcore", "trancecore", "german"}
+	if len(got) != len(want) {
+		t.Fatalf("len %d, want %d; got=%v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("tag %d: got %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestExtractTags_NoBlock(t *testing.T) {
+	if got := extractTags(`<html>no tags at all</html>`, 3); got != nil {
+		t.Errorf("expected nil, got %v", got)
+	}
+}
+
 func TestArtistKey_Normalization(t *testing.T) {
 	cases := map[string]string{
 		"  Irken Armada ":  "irken armada",

@@ -2,6 +2,7 @@ package discord
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -66,26 +67,25 @@ func (c *Client) enrichMusicListeners(ctx ctxpkg.Ctx, entries []llm.MusicEntry) 
 			defer func() { <-sem }()
 			key := lastfm.ArtistKey(out[i].Artist)
 
-			// Cache lookup first.
-			listeners, fetchedAt, ok, err := c.Bot.Store.GetLastfmListeners(budgetCtx, key)
+			// Cache lookup first (new tags-aware call).
+			listeners, tags, fetchedAt, ok, err := c.Bot.Store.GetLastfmArtist(budgetCtx, key)
 			if err != nil {
 				_ = level.Warn(ctx.Log()).Log("msg", "lastfm cache lookup failed", "artist", out[i].Artist, "error", err)
 			}
 			if ok && time.Since(fetchedAt) < lastfmCacheTTL {
 				out[i].Listeners = listeners
+				out[i].Tags = tags
 				return
 			}
 
-			// Miss or stale — hit Last.fm.
+			// Miss or stale — hit Last.fm for listeners + tags in one fetch.
 			reqCtx, reqCancel := context.WithTimeout(budgetCtx, lastfmPerRequestTimeout)
 			defer reqCancel()
-			n, ferr := c.lastfm.LookupListeners(reqCtx, out[i].Artist)
+			info, ferr := c.lastfm.LookupArtist(reqCtx, out[i].Artist)
 			if ferr != nil {
-				// ErrNotFound is a cacheable zero — artist just doesn't exist
-				// on Last.fm. Any other failure we don't cache; next pass
-				// will retry.
-				if ferr == lastfm.ErrNotFound {
-					if werr := c.Bot.Store.UpsertLastfmListeners(budgetCtx, key, 0); werr != nil {
+				if errors.Is(ferr, lastfm.ErrNotFound) {
+					// Cacheable zero — artist genuinely not on Last.fm.
+					if werr := c.Bot.Store.UpsertLastfmArtist(budgetCtx, key, 0, nil); werr != nil {
 						_ = level.Warn(ctx.Log()).Log("msg", "lastfm cache upsert (not-found) failed", "artist", out[i].Artist, "error", werr)
 					}
 					return
@@ -93,8 +93,9 @@ func (c *Client) enrichMusicListeners(ctx ctxpkg.Ctx, entries []llm.MusicEntry) 
 				_ = level.Warn(ctx.Log()).Log("msg", "lastfm lookup failed", "artist", out[i].Artist, "error", ferr)
 				return
 			}
-			out[i].Listeners = n
-			if werr := c.Bot.Store.UpsertLastfmListeners(budgetCtx, key, n); werr != nil {
+			out[i].Listeners = info.Listeners
+			out[i].Tags = info.Tags
+			if werr := c.Bot.Store.UpsertLastfmArtist(budgetCtx, key, info.Listeners, info.Tags); werr != nil {
 				_ = level.Warn(ctx.Log()).Log("msg", "lastfm cache upsert failed", "artist", out[i].Artist, "error", werr)
 			}
 		}()
@@ -103,26 +104,34 @@ func (c *Client) enrichMusicListeners(ctx ctxpkg.Ctx, entries []llm.MusicEntry) 
 	return out
 }
 
-// mergeListeners walks prior entries and copies any known Listeners value
-// into the corresponding dedupe-key match in fresh, so a re-enriched digest
-// doesn't lose the popularity signal for entries that were already looked up
-// earlier in the day.
+// mergeListeners carries previously-enriched listener counts and tags from
+// prior entries into fresh, matched by dedupe key. Lets a same-day edit skip
+// re-looking-up artists we already enriched on the first match.
 func mergeListeners(fresh, prior []llm.MusicEntry) []llm.MusicEntry {
 	if len(prior) == 0 {
 		return fresh
 	}
-	byKey := make(map[string]int, len(prior))
-	for _, p := range prior {
-		if p.Listeners > 0 {
-			byKey[llm.MusicDedupeKey(p)] = p.Listeners
-		}
+	type entry struct {
+		listeners int
+		tags      []string
 	}
-	for i := range fresh {
-		if fresh[i].Listeners > 0 {
+	byKey := make(map[string]entry, len(prior))
+	for _, p := range prior {
+		if p.Listeners == 0 && len(p.Tags) == 0 {
 			continue
 		}
-		if n, ok := byKey[llm.MusicDedupeKey(fresh[i])]; ok {
-			fresh[i].Listeners = n
+		byKey[llm.MusicDedupeKey(p)] = entry{listeners: p.Listeners, tags: p.Tags}
+	}
+	for i := range fresh {
+		e, ok := byKey[llm.MusicDedupeKey(fresh[i])]
+		if !ok {
+			continue
+		}
+		if fresh[i].Listeners == 0 {
+			fresh[i].Listeners = e.listeners
+		}
+		if len(fresh[i].Tags) == 0 {
+			fresh[i].Tags = e.tags
 		}
 	}
 	return fresh

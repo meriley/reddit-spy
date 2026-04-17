@@ -23,6 +23,10 @@ type MusicEntry struct {
 	// extraction. Zero means "unknown / not looked up yet"; the renderer
 	// uses this only as a popularity tiebreaker and never requires it.
 	Listeners int `json:"listeners,omitempty"`
+	// Tags is up to a few top genre tags from Last.fm's Related Tags block.
+	// Nil/empty is normal for unknown artists; renderer treats absent tags
+	// as "no genre annotation available" and doesn't penalize ordering.
+	Tags []string `json:"tags,omitempty"`
 }
 
 // MusicInput drives a single ShapeMusic call. Pass the existing entries via

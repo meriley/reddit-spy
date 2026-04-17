@@ -165,6 +165,12 @@ func (m *mockStore) GetLastfmListeners(_ context.Context, _ string) (int, time.T
 func (m *mockStore) UpsertLastfmListeners(_ context.Context, _ string, _ int) error {
 	return nil
 }
+func (m *mockStore) GetLastfmArtist(_ context.Context, _ string) (int, []string, time.Time, bool, error) {
+	return 0, nil, time.Time{}, false, nil
+}
+func (m *mockStore) UpsertLastfmArtist(_ context.Context, _ string, _ int, _ []string) error {
+	return nil
+}
 func (m *mockStore) GetSubreddits(_ context.Context) ([]*dbstore.Subreddit, error) {
 	return nil, nil
 }
