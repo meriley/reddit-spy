@@ -115,16 +115,18 @@ func mergeListeners(fresh, prior []llm.MusicEntry) []llm.MusicEntry {
 		listeners  int
 		tags       []string
 		youtubeURL string
+		qobuzURL   string
 	}
 	byKey := make(map[string]entry, len(prior))
 	for _, p := range prior {
-		if p.Listeners == 0 && len(p.Tags) == 0 && p.YoutubeURL == "" {
+		if p.Listeners == 0 && len(p.Tags) == 0 && p.YoutubeURL == "" && p.QobuzURL == "" {
 			continue
 		}
 		byKey[llm.MusicDedupeKey(p)] = entry{
 			listeners:  p.Listeners,
 			tags:       p.Tags,
 			youtubeURL: p.YoutubeURL,
+			qobuzURL:   p.QobuzURL,
 		}
 	}
 	for i := range fresh {
@@ -140,6 +142,9 @@ func mergeListeners(fresh, prior []llm.MusicEntry) []llm.MusicEntry {
 		}
 		if fresh[i].YoutubeURL == "" {
 			fresh[i].YoutubeURL = e.youtubeURL
+		}
+		if fresh[i].QobuzURL == "" {
+			fresh[i].QobuzURL = e.qobuzURL
 		}
 	}
 	return fresh

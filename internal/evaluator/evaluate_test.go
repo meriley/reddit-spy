@@ -175,6 +175,10 @@ func (m *mockStore) GetPipedVideo(_ context.Context, _ string) (string, time.Tim
 	return "", time.Time{}, false, nil
 }
 func (m *mockStore) UpsertPipedVideo(_ context.Context, _, _ string) error { return nil }
+func (m *mockStore) GetQobuzAlbum(_ context.Context, _ string) (string, time.Time, bool, error) {
+	return "", time.Time{}, false, nil
+}
+func (m *mockStore) UpsertQobuzAlbum(_ context.Context, _, _ string) error { return nil }
 func (m *mockStore) GetSubreddits(_ context.Context) ([]*dbstore.Subreddit, error) {
 	return nil, nil
 }

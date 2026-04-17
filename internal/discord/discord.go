@@ -17,6 +17,7 @@ import (
 	"github.com/meriley/reddit-spy/internal/lastfm"
 	"github.com/meriley/reddit-spy/internal/llm"
 	"github.com/meriley/reddit-spy/internal/piped"
+	"github.com/meriley/reddit-spy/internal/qobuz"
 	"github.com/meriley/reddit-spy/redditDiscordBot"
 )
 
@@ -82,6 +83,10 @@ type Client struct {
 	// so the digest can link titles to music.youtube.com. Optional.
 	piped *piped.Client
 
+	// qobuz scrapes qobuz.com's public search page so a second link can be
+	// rendered alongside the YouTube one for Qobuz subscribers. Optional.
+	qobuz *qobuz.Client
+
 	// loc is the tz used to compute dayLocal. Loaded once at New() time.
 	loc *time.Location
 
@@ -126,6 +131,12 @@ func WithLastfm(lf *lastfm.Client) Option {
 // per music-mode entry so titles render as clickable links.
 func WithPiped(p *piped.Client) Option {
 	return func(c *Client) { c.piped = p }
+}
+
+// WithQobuz attaches a Qobuz client used to append a second [Q] link per
+// music-mode entry for Qobuz subscribers.
+func WithQobuz(q *qobuz.Client) Option {
+	return func(c *Client) { c.qobuz = q }
 }
 
 func New(ctx ctxpkg.Ctx, bot *redditDiscordBot.RedditDiscordBot, opts ...Option) (*Client, error) {

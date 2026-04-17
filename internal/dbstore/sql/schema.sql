@@ -117,3 +117,12 @@ CREATE TABLE IF NOT EXISTS piped_cache (
     fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE piped_cache ADD COLUMN IF NOT EXISTS youtube_url TEXT NOT NULL DEFAULT '';
+
+-- Qobuz album-page search cache. query_key is the normalized `artist title`
+-- string. qobuz_url is the full qobuz.com/us-en/album URL; empty string is
+-- a cacheable "no matching album" outcome.
+CREATE TABLE IF NOT EXISTS qobuz_cache (
+    query_key  TEXT        PRIMARY KEY,
+    qobuz_url  TEXT        NOT NULL DEFAULT '',
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

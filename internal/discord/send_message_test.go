@@ -141,6 +141,10 @@ func (s *fakeStore) GetPipedVideo(_ context.Context, _ string) (string, time.Tim
 	return "", time.Time{}, false, nil
 }
 func (s *fakeStore) UpsertPipedVideo(_ context.Context, _, _ string) error { return nil }
+func (s *fakeStore) GetQobuzAlbum(_ context.Context, _ string) (string, time.Time, bool, error) {
+	return "", time.Time{}, false, nil
+}
+func (s *fakeStore) UpsertQobuzAlbum(_ context.Context, _, _ string) error { return nil }
 
 // ---------- fake sender ----------
 

@@ -54,6 +54,9 @@ type Store interface {
 
 	GetPipedVideo(ctx context.Context, queryKey string) (videoID string, fetchedAt time.Time, ok bool, err error)
 	UpsertPipedVideo(ctx context.Context, queryKey, videoID string) error
+
+	GetQobuzAlbum(ctx context.Context, queryKey string) (qobuzURL string, fetchedAt time.Time, ok bool, err error)
+	UpsertQobuzAlbum(ctx context.Context, queryKey, qobuzURL string) error
 }
 
 type PGXStore struct {
@@ -682,6 +685,43 @@ func (db *PGXStore) UpsertPipedVideo(parent context.Context, queryKey, youtubeUR
 	`, queryKey, youtubeURL)
 	if err != nil {
 		return fmt.Errorf("failed to upsert piped cache: %w", err)
+	}
+	return nil
+}
+
+// GetQobuzAlbum returns the cached Qobuz album URL for a normalized query.
+// Empty string is a legitimate cached "no match" outcome. ok is false on
+// cache miss.
+func (db *PGXStore) GetQobuzAlbum(parent context.Context, queryKey string) (string, time.Time, bool, error) {
+	qctx, cancel := context.WithTimeout(parent, DefaultQueryTimeout)
+	defer cancel()
+
+	var qobuzURL string
+	var fetchedAt time.Time
+	err := db.QueryRow(qctx, `SELECT qobuz_url, fetched_at FROM qobuz_cache WHERE query_key = $1`, queryKey).
+		Scan(&qobuzURL, &fetchedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", time.Time{}, false, nil
+		}
+		return "", time.Time{}, false, fmt.Errorf("failed to read qobuz cache: %w", err)
+	}
+	return qobuzURL, fetchedAt, true, nil
+}
+
+// UpsertQobuzAlbum writes a Qobuz hit, refreshing fetched_at. Empty URL is
+// a valid cached "no match" outcome and stops further lookups for the TTL.
+func (db *PGXStore) UpsertQobuzAlbum(parent context.Context, queryKey, qobuzURL string) error {
+	qctx, cancel := context.WithTimeout(parent, DefaultQueryTimeout)
+	defer cancel()
+	_, err := db.Exec(qctx, `
+		INSERT INTO qobuz_cache (query_key, qobuz_url, fetched_at)
+		VALUES ($1, $2, now())
+		ON CONFLICT (query_key) DO UPDATE
+		SET qobuz_url = EXCLUDED.qobuz_url, fetched_at = now()
+	`, queryKey, qobuzURL)
+	if err != nil {
+		return fmt.Errorf("failed to upsert qobuz cache: %w", err)
 	}
 	return nil
 }

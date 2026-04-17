@@ -32,6 +32,10 @@ type MusicEntry struct {
 	// singles (and as a fallback when no album playlist exists). Empty when
 	// Piped is disabled, lookups failed, or the search returned no results.
 	YoutubeURL string `json:"youtube_url,omitempty"`
+	// QobuzURL is the full qobuz.com/us-en/album URL when the keyless
+	// search scrape found a hit whose slug contains the artist. Empty
+	// otherwise; the renderer omits the Qobuz link when absent.
+	QobuzURL string `json:"qobuz_url,omitempty"`
 }
 
 // MusicInput drives a single ShapeMusic call. Pass the existing entries via

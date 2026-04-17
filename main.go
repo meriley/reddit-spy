@@ -18,6 +18,7 @@ import (
 	"github.com/meriley/reddit-spy/internal/lastfm"
 	"github.com/meriley/reddit-spy/internal/llm"
 	"github.com/meriley/reddit-spy/internal/piped"
+	"github.com/meriley/reddit-spy/internal/qobuz"
 	"github.com/meriley/reddit-spy/redditDiscordBot"
 )
 
@@ -70,6 +71,13 @@ func main() {
 	if pipedURL := os.Getenv("PIPED_BASE_URL"); pipedURL != "" {
 		discordOpts = append(discordOpts, discord.WithPiped(piped.New(pipedURL, piped.DefaultTimeout)))
 		_ = level.Info(appCtx.Log()).Log("msg", "piped enabled", "base_url", pipedURL)
+	}
+	// Qobuz album-URL enrichment is keyless (HTML scrape of qobuz.com) —
+	// no env gate needed. Disable by setting QOBUZ_DISABLED=1 if the
+	// upstream HTML changes and we need to ship a fix.
+	if os.Getenv("QOBUZ_DISABLED") == "" {
+		discordOpts = append(discordOpts, discord.WithQobuz(qobuz.New(qobuz.DefaultTimeout)))
+		_ = level.Info(appCtx.Log()).Log("msg", "qobuz enabled")
 	}
 
 	discordClient, err := discord.New(appCtx, bot, discordOpts...)

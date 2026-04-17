@@ -208,11 +208,12 @@ func sortByPopularity(entries []llm.MusicEntry) {
 
 // formatMusicLineCompact renders one entry as:
 //
-//	**Artist** – [Title](https://music.youtube.com/…) `tag1, tag2`
+//	**Artist** – [Title](music.youtube.com/…) · [Q](qobuz.com/…) `tag1, tag2`
 //
-// The URL may be a watch?v=… (song) or a playlist?list=… (full album playlist).
-// When there's no Piped-sourced URL the title stays unlinked. Tags come from
-// Last.fm and are omitted when absent.
+// The YouTube URL may be watch?v=… (song) or playlist?list=… (album). The
+// Qobuz link is appended only for subscribers — it's elided when absent.
+// Title stays unlinked if no YouTube URL was resolved. Tags are omitted when
+// absent.
 func formatMusicLineCompact(e llm.MusicEntry) string {
 	title := e.Title
 	if e.YoutubeURL != "" {
@@ -222,6 +223,9 @@ func formatMusicLineCompact(e llm.MusicEntry) string {
 		title = fmt.Sprintf("[%s](%s)", safe, e.YoutubeURL)
 	}
 	base := fmt.Sprintf("**%s** – %s", e.Artist, title)
+	if e.QobuzURL != "" {
+		base += fmt.Sprintf(" · [Q](%s)", e.QobuzURL)
+	}
 	if len(e.Tags) == 0 {
 		return base
 	}
@@ -333,6 +337,7 @@ func (c *Client) handleMusicMatch(
 	merged = mergeListeners(merged, known)
 	merged = c.enrichMusicListeners(ctx, merged)
 	merged = c.enrichMusicYouTubeIDs(ctx, merged)
+	merged = c.enrichMusicQobuzURLs(ctx, merged)
 	// Persist enriched signals so we don't re-lookup on the next same-day match.
 	if enriched, eerr := encodeMusicEntries(merged); eerr == nil {
 		rp.Entries = enriched
