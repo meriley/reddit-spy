@@ -100,15 +100,21 @@ func (c *Client) LookupListeners(ctx context.Context, artist string) (int, error
 }
 
 // extractListeners finds the listener count in a Last.fm artist page. The
-// page carries the canonical count in an <abbr title="5,323,765"> tag next to
-// the "Listeners" label — we match against a small set of resilient patterns
-// so a CSS-class rename doesn't take the whole digest with it.
+// page renders the canonical count in a `<abbr class="intabbr js-abbreviated-counter"
+// title="305,227">305.2K</abbr>` element immediately after the `Listeners</h4>`
+// header. We try a tight regex first (header + nearest abbr) and fall through
+// to progressively fuzzier patterns so a CSS-class rename or HTML rearrange
+// doesn't blind the scraper wholesale.
 var listenerPatterns = []*regexp.Regexp{
-	// Preferred: the exact-count tooltip next to the Listeners header.
-	// <abbr title="5,323,765" class="intro-stats-number">5.3M</abbr>
+	// Preferred: the abbr immediately following the "Listeners" section header.
+	// (?s) = dot matches newlines; non-greedy `.*?` keeps the nearest match.
+	regexp.MustCompile(`(?s)Listeners\s*</h4>.*?<abbr[^>]*title="([0-9,]+)"`),
+	// Second cut: the intabbr stats element itself, first occurrence on the
+	// page (listeners is always rendered before scrobbles in the header).
+	regexp.MustCompile(`<abbr[^>]*class="[^"]*intabbr[^"]*"[^>]*title="([0-9,]+)"`),
+	// Legacy layout: some older artist pages used intro-stats-number.
 	regexp.MustCompile(`<abbr[^>]*title="([0-9,]+)"[^>]*class="[^"]*intro-stats-number`),
 	// JSON-LD variant (Last.fm has emitted this on some pages).
-	// "interactionStatistic":{"@type":"InteractionCounter","userInteractionCount":5323765
 	regexp.MustCompile(`"userInteractionCount"\s*:\s*"?([0-9,]+)"?`),
 	// Fallback: `>5,323,765</abbr>\s*listeners` form (case-insensitive).
 	regexp.MustCompile(`(?i)>\s*([0-9,]+)\s*</[a-z]+>\s*listeners`),
