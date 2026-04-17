@@ -46,6 +46,10 @@ func (s *Shaper) ShapeMusic(ctx context.Context, in MusicInput) ([]MusicEntry, e
 	req := openai.ChatCompletionRequest{
 		Model:       s.cfg.Model,
 		Temperature: 0.1,
+		// Cap output so vLLM doesn't drift and blow the http timeout on a
+		// runaway completion. 3000 tokens fits ~100 JSON entries, which is
+		// more than any weekly-release thread produces in practice.
+		MaxTokens: 3000,
 		Messages: []openai.ChatCompletionMessage{
 			{Role: openai.ChatMessageRoleSystem, Content: systemPromptMusic},
 			{Role: openai.ChatMessageRoleUser, Content: prompt},
