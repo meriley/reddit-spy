@@ -15,6 +15,7 @@ import (
 	ctxpkg "github.com/meriley/reddit-spy/internal/context"
 	dbstore "github.com/meriley/reddit-spy/internal/dbstore"
 	"github.com/meriley/reddit-spy/internal/evaluator"
+	"github.com/meriley/reddit-spy/internal/llm"
 	redditJSON "github.com/meriley/reddit-spy/internal/redditJSON"
 )
 
@@ -73,7 +74,7 @@ func (c *Client) previewHandler(s *discordgo.Session, i *discordgo.InteractionCr
 		return
 	}
 
-	embed, notice, err := c.buildPreview(c.Ctx, i.ChannelID, urlArg)
+	embeds, notice, err := c.buildPreview(c.Ctx, i.ChannelID, urlArg)
 	if err != nil {
 		_, ferr := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
 			Content: fmt.Sprintf(":warning: preview failed: %s", err),
@@ -85,18 +86,24 @@ func (c *Client) previewHandler(s *discordgo.Session, i *discordgo.InteractionCr
 		return
 	}
 
+	// Discord caps embeds per message at 10. Preview should normally fit,
+	// but truncate defensively so a sprawling music digest doesn't 400.
+	if len(embeds) > 10 {
+		embeds = embeds[:10]
+	}
+
 	if _, ferr := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
 		Content: notice,
-		Embeds:  []*discordgo.MessageEmbed{embed},
+		Embeds:  embeds,
 		Flags:   flags,
 	}); ferr != nil {
 		_ = level.Error(c.Ctx.Log()).Log("msg", "preview_digest: followup failed", "error", ferr)
 	}
 }
 
-// buildPreview is the substantive work: fetch, match, shape, render. Returns
-// the embed + a short notice line + error.
-func (c *Client) buildPreview(ctx ctxpkg.Ctx, channelExternalID, urlOrID string) (*discordgo.MessageEmbed, string, error) {
+// buildPreview fetches, matches, shapes, and renders — dispatched by the
+// rule's mode. Returns the embeds to show, a short notice line, and an error.
+func (c *Client) buildPreview(ctx ctxpkg.Ctx, channelExternalID, urlOrID string) ([]*discordgo.MessageEmbed, string, error) {
 	postID, err := parseRedditPostID(urlOrID)
 	if err != nil {
 		return nil, "", err
@@ -140,6 +147,11 @@ func (c *Client) buildPreview(ctx ctxpkg.Ctx, channelExternalID, urlOrID string)
 		return nil, "", fmt.Errorf("rolling-post lookup: %w", err)
 	}
 
+	mode := rule.Mode
+	if mode == "" {
+		mode = dbstore.ModeNarrative
+	}
+
 	fakeResult := &evaluator.MatchingEvaluationResult{
 		ChannelID: ch.ID,
 		RuleID:    rule.ID,
@@ -149,28 +161,92 @@ func (c *Client) buildPreview(ctx ctxpkg.Ctx, channelExternalID, urlOrID string)
 			ID:       rule.ID,
 			TargetID: rule.TargetID,
 			Exact:    rule.Exact,
+			Mode:     mode,
 		},
 	}
 
-	mode := "Fresh (first match of the Phoenix day)"
+	switch mode {
+	case dbstore.ModeMusic:
+		return c.previewMusic(ctx, existing, fakeResult, subreddit, dayLocal, rule, post)
+	default:
+		return c.previewNarrative(ctx, existing, fakeResult, ch, subreddit, dayLocal, rule, post)
+	}
+}
+
+func (c *Client) previewNarrative(
+	ctx ctxpkg.Ctx,
+	existing *dbstore.RollingPost,
+	fakeResult *evaluator.MatchingEvaluationResult,
+	ch *dbstore.DiscordChannel,
+	subreddit *dbstore.Subreddit,
+	dayLocal time.Time,
+	rule *dbstore.RuleDetail,
+	post *redditJSONPost,
+) ([]*discordgo.MessageEmbed, string, error) {
+	pathLabel := "Fresh (first match of the Phoenix day)"
 	var title, summary string
 	if existing == nil {
 		title, summary = c.freshNarrative(ctx, fakeResult)
 	} else {
-		mode = fmt.Sprintf("Update (today's digest already has %d post(s))", len(existing.IncludedPostIDs))
+		pathLabel = fmt.Sprintf("Update (today's digest already has %d post(s))", len(existing.IncludedPostIDs))
 		title, summary = c.updateNarrative(ctx, existing, fakeResult)
 	}
-
 	rp := buildRollingPostRow(existing, fakeResult, ch, subreddit, dayLocal, title, summary)
 	embed := buildDigestEmbed(rp, fakeResult, subreddit.ExternalID)
-
 	notice := fmt.Sprintf(
-		":microscope: **Preview** — nothing was sent to the channel and no DB rows changed.\n"+
+		":microscope: **Preview (narrative)** — nothing was sent to the channel and no DB rows changed.\n"+
 			"Path: **%s** · Rule `#%d` matched on `%s` (%s) · r/%s",
-		mode, rule.ID, rule.TargetID, ruleMatchLabel(rule.Exact), post.Subreddit,
+		pathLabel, rule.ID, rule.TargetID, ruleMatchLabel(rule.Exact), post.Subreddit,
 	)
-	return embed, notice, nil
+	return []*discordgo.MessageEmbed{embed}, notice, nil
 }
+
+func (c *Client) previewMusic(
+	ctx ctxpkg.Ctx,
+	existing *dbstore.RollingPost,
+	fakeResult *evaluator.MatchingEvaluationResult,
+	subreddit *dbstore.Subreddit,
+	dayLocal time.Time,
+	rule *dbstore.RuleDetail,
+	post *redditJSONPost,
+) ([]*discordgo.MessageEmbed, string, error) {
+	if c.shaper == nil {
+		return nil, "", fmt.Errorf("music mode requires an LLM shaper (LLM_BASE_URL unset?)")
+	}
+	var known []llm.MusicEntry
+	if existing != nil {
+		decoded, err := decodeMusicEntries(existing.Entries)
+		if err != nil {
+			return nil, "", err
+		}
+		known = decoded
+	}
+	newEntries, err := c.shaper.ShapeMusic(ctx, llm.MusicInput{
+		Post:         post,
+		KnownEntries: known,
+		RuleID:       rule.ID,
+		RuleTargetID: rule.TargetID,
+		RuleExact:    rule.Exact,
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("music extraction failed: %w", err)
+	}
+	rp, merged, err := buildMusicRollingPost(existing, fakeResult, subreddit, dayLocal, newEntries)
+	if err != nil {
+		return nil, "", err
+	}
+	embeds := renderMusicEmbeds(rp, merged, subreddit.ExternalID)
+	notice := fmt.Sprintf(
+		":microscope: **Preview (music)** — %d new release(s) extracted, %d total in the simulated digest. "+
+			"Nothing was sent to the channel and no DB rows changed.\nRule `#%d` on r/%s.",
+		len(newEntries), len(merged), rule.ID, post.Subreddit,
+	)
+	return embeds, notice, nil
+}
+
+// redditJSONPost is a local alias for redditJSON.RedditPost so the preview
+// helpers' signatures stay short.
+type redditJSONPost = redditJSON.RedditPost
 
 func ruleMatchLabel(exact bool) string {
 	if exact {

@@ -55,6 +55,18 @@ func (c *Client) subredditListenerOptions() []*discordgo.ApplicationCommandOptio
 			Required:    true,
 			Type:        discordgo.ApplicationCommandOptionBoolean,
 		},
+		{
+			Name:        "mode",
+			Description: "Digest style. Default: narrative. music = release extraction; summary/media are TODO.",
+			Required:    false,
+			Type:        discordgo.ApplicationCommandOptionString,
+			Choices: []*discordgo.ApplicationCommandOptionChoice{
+				{Name: "narrative (rewritten prose on each match)", Value: database.ModeNarrative},
+				{Name: "music (extract releases, dedupe list)", Value: database.ModeMusic},
+				{Name: "summary (TODO)", Value: database.ModeSummary},
+				{Name: "media (TODO)", Value: database.ModeMedia},
+			},
+		},
 	}
 }
 
@@ -100,6 +112,17 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 				return
 			}
 			rule.Exact = v
+		case "mode":
+			v, ok := option.Value.(string)
+			if !ok {
+				c.respondWithError(s, i, "invalid mode value")
+				return
+			}
+			if !database.IsValidMode(v) {
+				c.respondWithError(s, i, fmt.Sprintf("unknown mode %q", v))
+				return
+			}
+			rule.Mode = v
 		default:
 			_ = level.Error(c.Ctx.Log()).Log("error", "unexpected key",
 				"key", option.Name,

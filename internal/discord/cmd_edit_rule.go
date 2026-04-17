@@ -5,13 +5,15 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/go-kit/log/level"
+
+	database "github.com/meriley/reddit-spy/internal/dbstore"
 )
 
 func (c *Client) editRuleCommandConfig() CommandConfig {
 	return CommandConfig{
 		Command: &discordgo.ApplicationCommand{
 			Name:        "edit_rule",
-			Description: "Edit an existing rule's match value or exact/partial mode",
+			Description: "Edit an existing rule's match value, exact/partial flag, or digest mode",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Name:        "rule_id",
@@ -27,9 +29,21 @@ func (c *Client) editRuleCommandConfig() CommandConfig {
 				},
 				{
 					Name:        "exact",
-					Description: "New exact/partial mode (leave empty to keep current)",
+					Description: "New exact/partial flag (leave empty to keep current)",
 					Required:    false,
 					Type:        discordgo.ApplicationCommandOptionBoolean,
+				},
+				{
+					Name:        "digest_mode",
+					Description: "New digest mode (leave empty to keep current)",
+					Required:    false,
+					Type:        discordgo.ApplicationCommandOptionString,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{Name: "narrative", Value: database.ModeNarrative},
+						{Name: "music", Value: database.ModeMusic},
+						{Name: "summary (TODO)", Value: database.ModeSummary},
+						{Name: "media (TODO)", Value: database.ModeMedia},
+					},
 				},
 			},
 		},
@@ -70,6 +84,10 @@ func (c *Client) editRuleHandler(s *discordgo.Session, i *discordgo.InteractionC
 
 	newTarget := rule.Target
 	newExact := rule.Exact
+	newMode := rule.Mode
+	if newMode == "" {
+		newMode = database.ModeNarrative
+	}
 
 	for _, opt := range data.Options[1:] {
 		switch opt.Name {
@@ -81,18 +99,36 @@ func (c *Client) editRuleHandler(s *discordgo.Session, i *discordgo.InteractionC
 			if v, ok := opt.Value.(bool); ok {
 				newExact = v
 			}
+		case "digest_mode":
+			if v, ok := opt.Value.(string); ok && v != "" {
+				if !database.IsValidMode(v) {
+					c.respondWithError(s, i, fmt.Sprintf("unknown digest mode %q", v))
+					return
+				}
+				newMode = v
+			}
 		}
 	}
 
-	if newTarget == rule.Target && newExact == rule.Exact {
-		c.respondWithError(s, i, "No changes specified. Provide a new value or exact mode.")
+	unchanged := newTarget == rule.Target && newExact == rule.Exact && newMode == rule.Mode
+	if unchanged {
+		c.respondWithError(s, i, "No changes specified. Provide a new value, exact flag, or digest mode.")
 		return
 	}
 
-	if err := c.Bot.Store.UpdateRule(c.Ctx, ruleID, newTarget, newExact); err != nil {
-		_ = level.Error(c.Ctx.Log()).Log("error", "failed to update rule", "ruleID", ruleID, "err", err)
-		c.respondWithError(s, i, "Failed to update rule.")
-		return
+	if newTarget != rule.Target || newExact != rule.Exact {
+		if err := c.Bot.Store.UpdateRule(c.Ctx, ruleID, newTarget, newExact); err != nil {
+			_ = level.Error(c.Ctx.Log()).Log("error", "failed to update rule", "ruleID", ruleID, "err", err)
+			c.respondWithError(s, i, "Failed to update rule.")
+			return
+		}
+	}
+	if newMode != rule.Mode {
+		if err := c.Bot.Store.UpdateRuleMode(c.Ctx, ruleID, newMode); err != nil {
+			_ = level.Error(c.Ctx.Log()).Log("error", "failed to update rule mode", "ruleID", ruleID, "err", err)
+			c.respondWithError(s, i, "Failed to update rule digest mode.")
+			return
+		}
 	}
 
 	matchType := "partial"
@@ -104,8 +140,8 @@ func (c *Client) editRuleHandler(s *discordgo.Session, i *discordgo.InteractionC
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Flags: discordgo.MessageFlagsEphemeral,
-			Content: fmt.Sprintf("Updated rule #%d: r/%s — %s %s match on `%s`",
-				ruleID, rule.Subreddit, rule.TargetID, matchType, newTarget),
+			Content: fmt.Sprintf("Updated rule #%d: r/%s — %s %s match on `%s` · mode=%s",
+				ruleID, rule.Subreddit, rule.TargetID, matchType, newTarget, newMode),
 		},
 	})
 }
