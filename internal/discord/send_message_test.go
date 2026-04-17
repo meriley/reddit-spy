@@ -177,6 +177,9 @@ func (s *fakeShaper) ShapeUpdate(_ ctxpkg.Ctx, _ llm.UpdateInput) (llm.Output, e
 	s.updateCalls++
 	return s.updateOut, nil
 }
+func (s *fakeShaper) ShapeMusic(_ ctxpkg.Ctx, _ llm.MusicInput) ([]llm.MusicEntry, error) {
+	return nil, nil
+}
 
 // ---------- helpers ----------
 

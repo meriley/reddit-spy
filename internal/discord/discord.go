@@ -30,6 +30,7 @@ const PhoenixTZ = "America/Phoenix"
 type Shaper interface {
 	ShapeFresh(ctx ctxpkg.Ctx, in llm.FreshInput) (llm.Output, error)
 	ShapeUpdate(ctx ctxpkg.Ctx, in llm.UpdateInput) (llm.Output, error)
+	ShapeMusic(ctx ctxpkg.Ctx, in llm.MusicInput) ([]llm.MusicEntry, error)
 }
 
 // MessageSender isolates the two discordgo.Session methods SendMessage needs,
@@ -51,6 +52,10 @@ func (a shaperAdapter) ShapeFresh(ctx ctxpkg.Ctx, in llm.FreshInput) (llm.Output
 
 func (a shaperAdapter) ShapeUpdate(ctx ctxpkg.Ctx, in llm.UpdateInput) (llm.Output, error) {
 	return a.inner.ShapeUpdate(ctx, in)
+}
+
+func (a shaperAdapter) ShapeMusic(ctx ctxpkg.Ctx, in llm.MusicInput) ([]llm.MusicEntry, error) {
+	return a.inner.ShapeMusic(ctx, in)
 }
 
 type Client struct {
@@ -240,6 +245,18 @@ func (c *Client) SendMessage(ctx ctxpkg.Ctx, result *evaluator.MatchingEvaluatio
 	existing, err := c.Bot.Store.GetRollingPost(ctx, result.ChannelID, subreddit.ID, dayLocal)
 	if err != nil {
 		return fmt.Errorf("failed to fetch rolling post: %w", err)
+	}
+
+	// Dispatch by rule.Mode. Unrecognised modes (or legacy nil) fall through
+	// to narrative so an operator who sets the column directly to something
+	// weird still gets output.
+	mode := dbstore.ModeNarrative
+	if result.Rule != nil && result.Rule.Mode != "" {
+		mode = result.Rule.Mode
+	}
+	switch mode {
+	case dbstore.ModeMusic:
+		return c.handleMusicMatch(ctx, existing, result, ch, subreddit, dayLocal)
 	}
 
 	var (

@@ -1,6 +1,9 @@
 package llm
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 const systemPrompt = `You are the editorial voice of a private Discord digest
 bot that summarizes Reddit posts for one reader. Write in compact, third-person
@@ -10,6 +13,14 @@ allows it. Keep output within the requested character budget. Output plain text
 only — no Markdown headings, no bullet lists unless the source content is
 explicitly a list of track names or similar; in that case, keep the list
 compact.`
+
+const systemPromptMusic = `You extract music releases from Reddit weekly-release
+threads. You return JSON only, never prose. Each entry is an artist plus a
+title plus a kind marker ("single" | "album" | "ep"). Treat lines that end
+with "(Album)" / "(LP)" as album, "(EP)" as ep, everything else as single.
+Keep any "feat. X" inside the title, not the artist. Skip section headers,
+playlists, and commentary. If the input contains no releases, return an
+empty entries array. Never invent entries that aren't in the post body.`
 
 // promptFresh builds the user prompt for the first matching post of a
 // (subreddit, Phoenix-day) pair.
@@ -79,6 +90,50 @@ Return ONLY the JSON object, nothing else.`,
 		in.NewRuleID, in.NewRuleTargetID, ruleMatchType(in.NewRuleExact),
 		clipForPrompt(in.NewPost.Selftext, 6000),
 	)
+}
+
+// promptMusicExtract is the user prompt for the music-digest shaper. Passes
+// the already-known entries so the model can skip duplicates across days /
+// threads / subreddits.
+func promptMusicExtract(in MusicInput) string {
+	knownJSON, _ := json.Marshal(shrinkForSkipList(in.KnownEntries))
+	return fmt.Sprintf(`Extract music releases from the Reddit post below.
+
+Return a JSON object of the form:
+  {"entries": [{"artist": "...", "title": "...", "kind": "single"|"album"|"ep"}, ...]}
+
+Do NOT include any entry whose normalized (artist, title, kind) already
+appears in the skip list; case and whitespace do not matter, and any
+"(feat. ...)" fragment is ignored when comparing.
+
+Skip list (%d entries):
+%s
+
+Source post:
+  author:    u/%s
+  subreddit: r/%s
+  title:     %s
+  body:
+%s
+
+Return ONLY the JSON object, nothing else.`,
+		len(in.KnownEntries),
+		string(knownJSON),
+		in.Post.Author,
+		in.Post.Subreddit,
+		quoteSingleLine(in.Post.Title),
+		clipForPrompt(in.Post.Selftext, 8000),
+	)
+}
+
+// shrinkForSkipList trims fields we don't need inside the prompt so the skip
+// list stays compact even with hundreds of entries.
+func shrinkForSkipList(in []MusicEntry) []MusicEntry {
+	out := make([]MusicEntry, len(in))
+	for i, e := range in {
+		out[i] = MusicEntry{Artist: e.Artist, Title: e.Title, Kind: e.Kind}
+	}
+	return out
 }
 
 func toneLine(tone string) string {
