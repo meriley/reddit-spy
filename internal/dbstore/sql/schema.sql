@@ -82,6 +82,8 @@ CREATE TABLE IF NOT EXISTS rolling_posts (
     latest_comments     INT  NOT NULL DEFAULT 0,
     latest_url          TEXT NOT NULL DEFAULT '',
     latest_thumbnail    TEXT NOT NULL DEFAULT '',
+    thread_id           TEXT NOT NULL DEFAULT '',        -- discord thread that holds the full spill; '' before first open
+    thread_message_ids  TEXT[] NOT NULL DEFAULT '{}',    -- replies inside thread_id, in render order
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 -- Columns added after v2.1 — idempotent for existing deploys.
@@ -128,6 +130,10 @@ ALTER TABLE rolling_posts DROP CONSTRAINT IF EXISTS rolling_posts_discord_messag
 -- never ran, so the same reddit post was re-processed and re-sent).
 ALTER TABLE rolling_posts ALTER COLUMN discord_message_id DROP NOT NULL;
 ALTER TABLE rolling_posts ALTER COLUMN discord_message_id SET DEFAULT '';
+-- Thread-based digest rendering (music mode): parent message stays in the
+-- channel as an at-a-glance card; the thread holds the full per-release spill.
+ALTER TABLE rolling_posts ADD COLUMN IF NOT EXISTS thread_id          TEXT   NOT NULL DEFAULT '';
+ALTER TABLE rolling_posts ADD COLUMN IF NOT EXISTS thread_message_ids TEXT[] NOT NULL DEFAULT '{}';
 CREATE INDEX IF NOT EXISTS rolling_posts_day_idx ON rolling_posts(day_local);
 -- Optimises the "latest active digest for (channel, mode)" lookup path.
 DROP INDEX IF EXISTS rolling_posts_active_idx;

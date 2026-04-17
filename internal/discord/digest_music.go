@@ -109,12 +109,121 @@ func buildMusicRollingPost(
 	return rp, merged, nil
 }
 
-// renderMusicEmbeds groups entries by kind (albums → EPs → singles) and lays
-// them out as compact lines under section headers. One embed per Discord
-// message; the renderer spills into a second/third embed when a single
-// description would exceed the 4000-rune budget.
-func renderMusicEmbeds(rp dbstore.RollingPost, entries []llm.MusicEntry, subredditNames []string) []*discordgo.MessageEmbed {
+// cardTopN caps each inline bucket on the parent card. Discord's per-field
+// value limit is 1024 runes — 5 compact lines stays well under that budget
+// even with long artist/title combos.
+const cardTopN = 5
+
+// fieldValueBudget — Discord hard limit is 1024; leave slack for the ellipsis
+// tail ("… +N more"). The parent card trims to this.
+const fieldValueBudget = 980
+
+// renderMusicCard builds the parent-message embed — a compact "at-a-glance"
+// card with three inline columns (Albums / EPs / Singles) showing the top
+// cardTopN entries per bucket. The full per-release spill lives in the thread
+// attached to this message (see renderMusicThreadEmbeds).
+func renderMusicCard(rp dbstore.RollingPost, entries []llm.MusicEntry, subredditNames []string) *discordgo.MessageEmbed {
+	totalStr := fmt.Sprintf("%d release", len(entries))
+	if len(entries) != 1 {
+		totalStr = fmt.Sprintf("%d releases", len(entries))
+	}
+	dayStr := rp.DayLocal.Format("2006-01-02")
+
+	subsHeader := "music digest"
+	if joined := joinSubNames(subredditNames); joined != "" {
+		subsHeader = joined + " — music digest"
+	}
+
+	albums, eps, singles := splitByKind(entries)
+	sortByPopularity(albums)
+	sortByPopularity(eps)
+	sortByPopularity(singles)
+
+	embed := &discordgo.MessageEmbed{
+		Type:  discordgo.EmbedTypeRich,
+		Color: embedColorReddit,
+		Title: truncateUTF8(subsHeader, 256),
+		URL:   rp.LatestURL,
+		Author: &discordgo.MessageEmbedAuthor{
+			Name: subsHeader,
+		},
+		Description: fmt.Sprintf("%s • full list in the thread below", totalStr),
+		Fields: []*discordgo.MessageEmbedField{
+			buildCardField("Albums", albums),
+			buildCardField("EPs", eps),
+			buildCardField("Singles", singles),
+		},
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: fmt.Sprintf("opened %s", dayStr),
+		},
+	}
+	return embed
+}
+
+// buildCardField renders one of the three inline columns. Displays up to
+// cardTopN entries, each as "**Artist** — Title" (no links in the card to
+// keep the column narrow and scannable). Overflow gets a trailing
+// "… +N more" line so readers know to open the thread.
+func buildCardField(name string, entries []llm.MusicEntry) *discordgo.MessageEmbedField {
+	if len(entries) == 0 {
+		return &discordgo.MessageEmbedField{
+			Name:   name,
+			Value:  "_—_",
+			Inline: true,
+		}
+	}
+	shown := entries
+	if len(shown) > cardTopN {
+		shown = shown[:cardTopN]
+	}
+	var b strings.Builder
+	for i, e := range shown {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		fmt.Fprintf(&b, "**%s** — %s", truncateUTF8(e.Artist, 48), truncateUTF8(e.Title, 48))
+	}
+	if extra := len(entries) - len(shown); extra > 0 {
+		fmt.Fprintf(&b, "\n_+%d more_", extra)
+	}
+	val := b.String()
+	if runeCount(val) > fieldValueBudget {
+		val = truncateUTF8(val, fieldValueBudget-1) + "…"
+	}
+	return &discordgo.MessageEmbedField{
+		Name:   fmt.Sprintf("%s (%d)", name, len(entries)),
+		Value:  val,
+		Inline: true,
+	}
+}
+
+// splitByKind returns (albums, eps, singles) in input order. "single" is the
+// default bucket for anything not tagged album or ep.
+func splitByKind(entries []llm.MusicEntry) ([]llm.MusicEntry, []llm.MusicEntry, []llm.MusicEntry) {
+	var albums, eps, singles []llm.MusicEntry
+	for _, e := range entries {
+		switch strings.ToLower(e.Kind) {
+		case "album":
+			albums = append(albums, e)
+		case "ep":
+			eps = append(eps, e)
+		default:
+			singles = append(singles, e)
+		}
+	}
+	return albums, eps, singles
+}
+
+// renderMusicThreadEmbeds builds the set of embeds that live as replies inside
+// the digest's thread. Each embed is a section (Albums, EPs, Singles) with
+// per-release links/tags; sections that overflow the 4000-rune description
+// budget spill into additional embeds (i/N suffix on the title).
+func renderMusicThreadEmbeds(rp dbstore.RollingPost, entries []llm.MusicEntry) []*discordgo.MessageEmbed {
 	lines := groupAndFormatMusic(entries)
+	chunks := chunkLines(lines, maxDescRunes)
+	if len(chunks) == 0 {
+		return nil
+	}
 
 	totalStr := fmt.Sprintf("%d release", len(entries))
 	if len(entries) != 1 {
@@ -122,39 +231,21 @@ func renderMusicEmbeds(rp dbstore.RollingPost, entries []llm.MusicEntry, subredd
 	}
 	dayStr := rp.DayLocal.Format("2006-01-02")
 
-	// Header: every contributing subreddit, joined. Falls back to just
-	// "music digest" when we can't resolve any names (defensive; normally
-	// at least one sub is always present).
-	subsHeader := "music digest"
-	if joined := joinSubNames(subredditNames); joined != "" {
-		subsHeader = joined + " — music digest"
-	}
-
-	chunks := chunkLines(lines, maxDescRunes)
-	if len(chunks) == 0 {
-		chunks = []string{"(no releases extracted yet)"}
-	}
-
 	embeds := make([]*discordgo.MessageEmbed, 0, len(chunks))
 	for i, body := range chunks {
-		title := subsHeader
+		title := "Full list"
 		if len(chunks) > 1 {
-			title = fmt.Sprintf("%s (%d/%d)", subsHeader, i+1, len(chunks))
+			title = fmt.Sprintf("Full list (%d/%d)", i+1, len(chunks))
 		}
-		e := &discordgo.MessageEmbed{
+		embeds = append(embeds, &discordgo.MessageEmbed{
 			Type:        discordgo.EmbedTypeRich,
 			Color:       embedColorReddit,
-			Title:       truncateUTF8(title, 256),
+			Title:       title,
 			Description: body,
 			Footer: &discordgo.MessageEmbedFooter{
 				Text: fmt.Sprintf("%s • %s", totalStr, dayStr),
 			},
-		}
-		if i == 0 {
-			e.URL = rp.LatestURL
-			e.Author = &discordgo.MessageEmbedAuthor{Name: subsHeader}
-		}
-		embeds = append(embeds, e)
+		})
 	}
 	return embeds
 }
@@ -335,7 +426,10 @@ func runeCount(s string) int {
 	return n
 }
 
-// handleMusicMatch is the SendMessage branch for music-mode rules.
+// handleMusicMatch is the SendMessage branch for music-mode rules. Output
+// shape: parent card in the channel + a thread attached to that card that
+// holds the full per-release spill. Same-window matches edit the card in
+// place and sync thread-reply messages by index.
 func (c *Client) handleMusicMatch(
 	ctx ctxpkg.Ctx,
 	existing *dbstore.RollingPost,
@@ -400,17 +494,45 @@ func (c *Client) handleMusicMatch(
 	}
 
 	subNames := c.resolveSubredditNames(ctx, rp.SubredditIDs)
-	embeds := renderMusicEmbeds(rp, merged, subNames)
+	card := renderMusicCard(rp, merged, subNames)
+	threadEmbeds := renderMusicThreadEmbeds(rp, merged)
 
-	var priorIDs []string
+	// 1. Parent card → channel. Edit prior id if we have one, else send fresh.
+	var priorParentIDs []string
 	if existing != nil {
-		priorIDs = existing.DiscordMessageIDs
+		priorParentIDs = existing.DiscordMessageIDs
 	}
-	newIDs, err := c.syncMessages(ctx, ch, priorIDs, embeds)
+	parentIDs, err := c.syncParentCard(ctx, ch.ExternalID, priorParentIDs, card)
 	if err != nil {
-		return err
+		return fmt.Errorf("sync parent card: %w", err)
 	}
-	rp.DiscordMessageIDs = newIDs
+	rp.DiscordMessageIDs = parentIDs
+	parentMsgID := ""
+	if len(parentIDs) > 0 {
+		parentMsgID = parentIDs[0]
+	}
+
+	// 2. Thread → attached to the parent message. Create on first open;
+	//    reuse (un-archive if needed) on subsequent window matches.
+	threadID := ""
+	if existing != nil {
+		threadID = existing.ThreadID
+	}
+	threadID, err = c.ensureThread(ctx, ch.ExternalID, parentMsgID, threadID, subNames)
+	if err != nil {
+		return fmt.Errorf("ensure digest thread: %w", err)
+	}
+	rp.ThreadID = threadID
+
+	var priorThreadReplies []string
+	if existing != nil {
+		priorThreadReplies = existing.ThreadMessageIDs
+	}
+	threadReplyIDs, err := c.syncThreadReplies(ctx, threadID, priorThreadReplies, threadEmbeds)
+	if err != nil {
+		return fmt.Errorf("sync thread replies: %w", err)
+	}
+	rp.ThreadMessageIDs = threadReplyIDs
 
 	if _, err := c.Bot.Store.UpsertRollingPost(ctx, rp); err != nil {
 		return fmt.Errorf("upsert music rolling post: %w", err)
@@ -421,44 +543,159 @@ func (c *Client) handleMusicMatch(
 	return nil
 }
 
-// syncMessages reconciles the list of Discord messages that back a rolling
-// digest with the set of embeds we want displayed. One embed per message,
-// indexed by position: overlap → edit, extras → send, missing → delete.
-func (c *Client) syncMessages(
+// syncParentCard sends (or edits) exactly one message in the channel to carry
+// the digest's at-a-glance card. Returns a single-element ID slice.
+func (c *Client) syncParentCard(
 	ctx ctxpkg.Ctx,
-	ch *dbstore.DiscordChannel,
+	channelID string,
+	priorIDs []string,
+	card *discordgo.MessageEmbed,
+) ([]string, error) {
+	prior := ""
+	if len(priorIDs) > 0 {
+		prior = priorIDs[0]
+	}
+
+	if prior == "" {
+		msg, err := c.sender.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+			Embeds: []*discordgo.MessageEmbed{card},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("send parent card: %w", err)
+		}
+		return []string{msg.ID}, nil
+	}
+
+	edited, err := c.sender.ChannelMessageEditComplex(&discordgo.MessageEdit{
+		Channel: channelID,
+		ID:      prior,
+		Embeds:  &[]*discordgo.MessageEmbed{card},
+	})
+	if isMessageGone(err) {
+		_ = level.Warn(ctx.Log()).Log(
+			"msg", "parent card missing; sending fresh",
+			"channel", channelID, "message_id", prior,
+		)
+		msg, sendErr := c.sender.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+			Embeds: []*discordgo.MessageEmbed{card},
+		})
+		if sendErr != nil {
+			return nil, fmt.Errorf("fallback send after parent-card 404: %w", sendErr)
+		}
+		return []string{msg.ID}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("edit parent card: %w", err)
+	}
+	// Drop any stale extras (previous release wrote multiple channel
+	// messages back when each section got its own message).
+	for i := 1; i < len(priorIDs); i++ {
+		if priorIDs[i] == "" {
+			continue
+		}
+		if derr := c.sender.ChannelMessageDelete(channelID, priorIDs[i]); derr != nil {
+			_ = level.Warn(ctx.Log()).Log(
+				"msg", "failed to delete stale channel message from pre-thread layout (non-fatal)",
+				"message_id", priorIDs[i], "error", derr,
+			)
+		}
+	}
+	return []string{edited.ID}, nil
+}
+
+// ensureThread returns a usable thread_id for the digest. If priorThreadID is
+// empty, creates a thread attached to parentMsgID (which lets "Open in thread"
+// work from the card). If priorThreadID is present, un-archives it when
+// Discord has auto-archived it after the 7-day idle window, so the next send
+// lands in the same thread instead of a new one.
+func (c *Client) ensureThread(
+	ctx ctxpkg.Ctx,
+	channelID, parentMsgID, priorThreadID string,
+	subredditNames []string,
+) (string, error) {
+	if priorThreadID != "" {
+		// Best-effort un-archive. Discord silently no-ops when the thread is
+		// already active; a permission/404 error here is non-fatal because
+		// send into the thread will surface the real failure.
+		if _, err := c.sender.ChannelEdit(priorThreadID, &discordgo.ChannelEdit{
+			Archived:            ptrBool(false),
+			AutoArchiveDuration: threadAutoArchiveMinutes,
+		}); err != nil && !isMessageGone(err) {
+			_ = level.Warn(ctx.Log()).Log(
+				"msg", "un-archive thread failed (non-fatal, will still try to send)",
+				"thread_id", priorThreadID, "error", err,
+			)
+		}
+		return priorThreadID, nil
+	}
+	if parentMsgID == "" {
+		return "", fmt.Errorf("cannot start thread: no parent message id")
+	}
+	name := threadName(subredditNames)
+	th, err := c.sender.MessageThreadStart(channelID, parentMsgID, name, threadAutoArchiveMinutes)
+	if err != nil {
+		return "", fmt.Errorf("start thread: %w", err)
+	}
+	return th.ID, nil
+}
+
+// threadName builds the sidebar label for the digest thread. Discord caps
+// thread names at 100 runes; our fallback-safe default stays well under it.
+func threadName(subredditNames []string) string {
+	joined := joinSubNames(subredditNames)
+	if joined == "" {
+		return "music digest"
+	}
+	name := joined + " — releases"
+	return truncateUTF8(name, 100)
+}
+
+func ptrBool(b bool) *bool { return &b }
+
+// syncThreadReplies reconciles the thread's reply messages with the set of
+// embeds we want displayed. Same index-aligned logic as the old
+// syncMessages, but scoped to a thread (threads ARE channels on the Discord
+// API, so the channel-message endpoints all accept a thread id).
+func (c *Client) syncThreadReplies(
+	ctx ctxpkg.Ctx,
+	threadID string,
 	priorIDs []string,
 	embeds []*discordgo.MessageEmbed,
 ) ([]string, error) {
+	if threadID == "" {
+		// No thread yet (e.g. parent send succeeded but thread creation is
+		// happening on a later tick). Caller has already logged; nothing to do.
+		return nil, nil
+	}
 	newIDs := make([]string, 0, len(embeds))
 	for i, embed := range embeds {
 		if i < len(priorIDs) && priorIDs[i] != "" {
 			edited, err := c.sender.ChannelMessageEditComplex(&discordgo.MessageEdit{
-				Channel: ch.ExternalID,
+				Channel: threadID,
 				ID:      priorIDs[i],
 				Embeds:  &[]*discordgo.MessageEmbed{embed},
 			})
 			if isMessageGone(err) {
-				msg, sendErr := c.sender.ChannelMessageSendComplex(ch.ExternalID, &discordgo.MessageSend{
+				msg, sendErr := c.sender.ChannelMessageSendComplex(threadID, &discordgo.MessageSend{
 					Embeds: []*discordgo.MessageEmbed{embed},
 				})
 				if sendErr != nil {
-					return nil, fmt.Errorf("fallback send after edit-404: %w", sendErr)
+					return nil, fmt.Errorf("fallback send after thread edit-404: %w", sendErr)
 				}
 				newIDs = append(newIDs, msg.ID)
 				continue
 			}
 			if err != nil {
-				return nil, fmt.Errorf("edit message %d: %w", i, err)
+				return nil, fmt.Errorf("edit thread message %d: %w", i, err)
 			}
 			newIDs = append(newIDs, edited.ID)
 			continue
 		}
-		msg, err := c.sender.ChannelMessageSendComplex(ch.ExternalID, &discordgo.MessageSend{
+		msg, err := c.sender.ChannelMessageSendComplex(threadID, &discordgo.MessageSend{
 			Embeds: []*discordgo.MessageEmbed{embed},
 		})
 		if err != nil {
-			return nil, fmt.Errorf("send message %d: %w", i, err)
+			return nil, fmt.Errorf("send thread message %d: %w", i, err)
 		}
 		newIDs = append(newIDs, msg.ID)
 	}
@@ -467,25 +704,12 @@ func (c *Client) syncMessages(
 		if priorIDs[i] == "" {
 			continue
 		}
-		if err := c.messageDelete(ch.ExternalID, priorIDs[i]); err != nil {
+		if err := c.sender.ChannelMessageDelete(threadID, priorIDs[i]); err != nil {
 			_ = level.Warn(ctx.Log()).Log(
-				"msg", "failed to delete stale spill message (non-fatal)",
+				"msg", "failed to delete stale thread-reply message (non-fatal)",
 				"message_id", priorIDs[i], "error", err,
 			)
 		}
 	}
 	return newIDs, nil
-}
-
-// messageDelete delegates to ChannelMessageDelete when the sender supports it.
-// Tests usually don't; the shrink path then silently no-ops (which is fine —
-// the stale embed just sits there until the next day rolls over).
-func (c *Client) messageDelete(channelID, messageID string) error {
-	type deleter interface {
-		ChannelMessageDelete(channelID, messageID string, options ...discordgo.RequestOption) error
-	}
-	if d, ok := c.sender.(deleter); ok {
-		return d.ChannelMessageDelete(channelID, messageID)
-	}
-	return nil
 }

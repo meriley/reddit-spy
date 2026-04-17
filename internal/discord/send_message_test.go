@@ -232,6 +232,21 @@ func (f *fakeSender) ChannelMessageEditComplex(m *discordgo.MessageEdit, _ ...di
 	return &discordgo.Message{ID: m.ID}, nil
 }
 
+// Thread-aware MessageSender stubs. Narrative-mode tests don't exercise
+// these paths; they're here to satisfy the interface. Music-mode tests
+// (added separately) drive them.
+func (f *fakeSender) ChannelMessageDelete(_, _ string, _ ...discordgo.RequestOption) error {
+	return nil
+}
+
+func (f *fakeSender) MessageThreadStart(_, _ string, name string, _ int, _ ...discordgo.RequestOption) (*discordgo.Channel, error) {
+	return &discordgo.Channel{ID: "thread-" + name}, nil
+}
+
+func (f *fakeSender) ChannelEdit(_ string, _ *discordgo.ChannelEdit, _ ...discordgo.RequestOption) (*discordgo.Channel, error) {
+	return &discordgo.Channel{}, nil
+}
+
 // ---------- fake shaper ----------
 
 type fakeShaper struct {

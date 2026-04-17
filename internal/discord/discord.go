@@ -36,12 +36,24 @@ type Shaper interface {
 	ShapeMusic(ctx ctxpkg.Ctx, in llm.MusicInput) ([]llm.MusicEntry, error)
 }
 
-// MessageSender isolates the two discordgo.Session methods SendMessage needs,
-// so tests can stub them without a live Discord connection.
+// MessageSender isolates the discordgo.Session methods SendMessage needs,
+// so tests can stub them without a live Discord connection. The thread-aware
+// methods (MessageThreadStart, ChannelEdit, ChannelMessageDelete) are used
+// by the music-mode B+C renderer — parent card in the channel, spill in a
+// per-digest thread.
 type MessageSender interface {
 	ChannelMessageSendComplex(channelID string, data *discordgo.MessageSend, options ...discordgo.RequestOption) (*discordgo.Message, error)
 	ChannelMessageEditComplex(m *discordgo.MessageEdit, options ...discordgo.RequestOption) (*discordgo.Message, error)
+	ChannelMessageDelete(channelID, messageID string, options ...discordgo.RequestOption) error
+	MessageThreadStart(channelID, messageID string, name string, archiveDuration int, options ...discordgo.RequestOption) (*discordgo.Channel, error)
+	ChannelEdit(channelID string, data *discordgo.ChannelEdit, options ...discordgo.RequestOption) (*discordgo.Channel, error)
 }
+
+// threadAutoArchiveMinutes is the 7-day auto-archive window Discord exposes.
+// Once Pedro's digest thread sits idle for this long it gets hidden from the
+// sidebar (not deleted) — the next same-window match un-archives it via
+// ChannelEdit.
+const threadAutoArchiveMinutes = 7 * 24 * 60 // 10080
 
 // shaperAdapter bridges ctxpkg.Ctx (the app's logger-carrying context) to the
 // plain context.Context the llm.Shaper expects.

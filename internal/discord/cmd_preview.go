@@ -265,12 +265,19 @@ func (c *Client) previewMusic(
 	merged = mergeListeners(merged, known)
 	merged = c.enrichMusicAll(ctx, merged)
 	subNames := c.resolveSubredditNames(ctx, rp.SubredditIDs)
-	embeds := renderMusicEmbeds(rp, merged, subNames)
-	// Caller sends one followup per embed — same trick the live post uses.
+	// Preview can't create a real thread (ephemeral followups don't support
+	// it), so we show the card + the thread spill embeds inline. The notice
+	// explains that in production these would land in a thread attached to
+	// the card instead of flowing past it here.
+	card := renderMusicCard(rp, merged, subNames)
+	threadEmbeds := renderMusicThreadEmbeds(rp, merged)
+	embeds := append([]*discordgo.MessageEmbed{card}, threadEmbeds...)
 	notice := fmt.Sprintf(
-		":microscope: **Preview (music)** — %d new release(s) extracted, %d total in the simulated digest "+
-			"across %d section(s). Nothing was sent to the channel and no DB rows changed.\nRule `#%d` on r/%s.",
-		len(newEntries), len(merged), len(embeds), rule.ID, post.Subreddit,
+		":microscope: **Preview (music)** — %d new release(s) extracted, %d total in the simulated digest.\n"+
+			"Shown below: the **parent card** (what lands in the channel) followed by the **thread spill** "+
+			"(what you'd see inside the attached thread — %d section message(s)). Nothing was sent to the "+
+			"channel and no DB rows changed.\nRule `#%d` on r/%s.",
+		len(newEntries), len(merged), len(threadEmbeds), rule.ID, post.Subreddit,
 	)
 	return embeds, notice, nil
 }

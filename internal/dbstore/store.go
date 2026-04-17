@@ -582,7 +582,9 @@ type RollingPost struct {
 	DayLocal          time.Time // display only; rendered in the footer
 	WindowStart       time.Time // when the digest opened; bucket key with rules.window_hours
 	Mode              string    // narrative | music | summary | media — bucket dimension
-	DiscordMessageIDs []string
+	DiscordMessageIDs []string  // parent message(s) in the channel (card in music mode, embeds in narrative)
+	ThreadID          string    // thread attached to DiscordMessageIDs[0] — holds the full spill in music mode; empty until opened
+	ThreadMessageIDs  []string  // reply messages inside ThreadID, in render order
 	NarrativeTitle    string
 	NarrativeSummary  string
 	Entries           []byte // mode-specific JSON payload; narrative mode leaves this empty
@@ -616,6 +618,8 @@ func (db *PGXStore) GetActiveRollingPost(parent context.Context, channelID int, 
 		       day_local, window_start,
 		       COALESCE(mode, 'narrative'),
 		       COALESCE(discord_message_ids, '{}'::text[]),
+		       COALESCE(thread_id, ''),
+		       COALESCE(thread_message_ids, '{}'::text[]),
 		       narrative_title, narrative_summary,
 		       COALESCE(entries, '[]'::jsonb),
 		       included_post_ids, included_rule_ids,
@@ -634,6 +638,7 @@ func (db *PGXStore) GetActiveRollingPost(parent context.Context, channelID int, 
 		&rp.SubredditID, &rp.SubredditIDs,
 		&rp.DayLocal, &rp.WindowStart,
 		&rp.Mode, &rp.DiscordMessageIDs,
+		&rp.ThreadID, &rp.ThreadMessageIDs,
 		&rp.NarrativeTitle, &rp.NarrativeSummary, &rp.Entries,
 		&rp.IncludedPostIDs, &rp.IncludedRuleIDs,
 		&rp.LatestScore, &rp.LatestComments, &rp.LatestURL,
@@ -827,6 +832,8 @@ func (db *PGXStore) UpsertRollingPost(parent context.Context, rp RollingPost) (*
 		day_local, window_start,
 		COALESCE(mode, 'narrative'),
 		COALESCE(discord_message_ids, '{}'::text[]),
+		COALESCE(thread_id, ''),
+		COALESCE(thread_message_ids, '{}'::text[]),
 		narrative_title, narrative_summary,
 		COALESCE(entries, '[]'::jsonb),
 		included_post_ids, included_rule_ids,
@@ -844,6 +851,10 @@ func (db *PGXStore) UpsertRollingPost(parent context.Context, rp RollingPost) (*
 	if subredditIDs == nil {
 		subredditIDs = []int{}
 	}
+	threadMessageIDs := rp.ThreadMessageIDs
+	if threadMessageIDs == nil {
+		threadMessageIDs = []string{}
+	}
 
 	if rp.ID == 0 {
 		// Fresh insert — stamp window_start if caller left it zero.
@@ -856,16 +867,18 @@ func (db *PGXStore) UpsertRollingPost(parent context.Context, rp RollingPost) (*
 				channel_id, subreddit_id, subreddit_ids,
 				day_local, window_start,
 				mode, discord_message_ids,
+				thread_id, thread_message_ids,
 				narrative_title, narrative_summary, entries,
 				included_post_ids, included_rule_ids,
 				latest_score, latest_comments, latest_url,
 				latest_thumbnail, updated_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now())
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, now())
 			RETURNING ` + selectCols
 		row = db.QueryRow(qctx, query,
 			rp.ChannelID, rp.SubredditID, subredditIDs,
 			rp.DayLocal, windowStart,
 			rp.Mode, rp.DiscordMessageIDs,
+			rp.ThreadID, threadMessageIDs,
 			rp.NarrativeTitle, rp.NarrativeSummary, entries,
 			rp.IncludedPostIDs, rp.IncludedRuleIDs,
 			rp.LatestScore, rp.LatestComments, rp.LatestURL,
@@ -880,15 +893,17 @@ func (db *PGXStore) UpsertRollingPost(parent context.Context, rp RollingPost) (*
 				subreddit_ids       = $2,
 				mode                = $3,
 				discord_message_ids = $4,
-				narrative_title     = $5,
-				narrative_summary   = $6,
-				entries             = $7,
-				included_post_ids   = $8,
-				included_rule_ids   = $9,
-				latest_score        = $10,
-				latest_comments     = $11,
-				latest_url          = $12,
-				latest_thumbnail    = $13,
+				thread_id           = $5,
+				thread_message_ids  = $6,
+				narrative_title     = $7,
+				narrative_summary   = $8,
+				entries             = $9,
+				included_post_ids   = $10,
+				included_rule_ids   = $11,
+				latest_score        = $12,
+				latest_comments     = $13,
+				latest_url          = $14,
+				latest_thumbnail    = $15,
 				updated_at          = now()
 			WHERE id = $1
 			RETURNING ` + selectCols
@@ -896,6 +911,7 @@ func (db *PGXStore) UpsertRollingPost(parent context.Context, rp RollingPost) (*
 			rp.ID,
 			subredditIDs,
 			rp.Mode, rp.DiscordMessageIDs,
+			rp.ThreadID, threadMessageIDs,
 			rp.NarrativeTitle, rp.NarrativeSummary, entries,
 			rp.IncludedPostIDs, rp.IncludedRuleIDs,
 			rp.LatestScore, rp.LatestComments, rp.LatestURL,
@@ -907,6 +923,7 @@ func (db *PGXStore) UpsertRollingPost(parent context.Context, rp RollingPost) (*
 		&out.ID, &out.ChannelID, &out.SubredditID, &out.SubredditIDs,
 		&out.DayLocal, &out.WindowStart,
 		&out.Mode, &out.DiscordMessageIDs,
+		&out.ThreadID, &out.ThreadMessageIDs,
 		&out.NarrativeTitle, &out.NarrativeSummary, &out.Entries,
 		&out.IncludedPostIDs, &out.IncludedRuleIDs,
 		&out.LatestScore, &out.LatestComments, &out.LatestURL,
