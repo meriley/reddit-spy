@@ -53,50 +53,77 @@ func ArtistKey(raw string) string {
 // ErrNotFound on HTTP 404. Any other failure (network, unexpected HTML shape,
 // context deadline) returns a non-nil error; callers should not cache those
 // outcomes as a zero-listener hit.
+//
+// Retries on transient upstream failures (502/503/504) with short exponential
+// backoff — Last.fm throws 502s under moderate burst load, and a single retry
+// usually recovers.
 func (c *Client) LookupListeners(ctx context.Context, artist string) (int, error) {
 	key := ArtistKey(artist)
 	if key == "" {
 		return 0, errors.New("lastfm: empty artist")
 	}
-	// Last.fm's artist URL encodes spaces as '+', not %20, and leaves most
-	// punctuation alone. url.QueryEscape gets us close enough; the ' ' → '+'
-	// is the important bit for actual artist slugs.
 	slug := strings.ReplaceAll(url.QueryEscape(artist), "%20", "+")
 	endpoint := "https://www.last.fm/music/" + slug
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("User-Agent", c.ua)
-	req.Header.Set("Accept", "text/html,application/xhtml+xml")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	backoffs := []time.Duration{0, 300 * time.Millisecond, 900 * time.Millisecond}
+	var lastErr error
+	for attempt, delay := range backoffs {
+		if delay > 0 {
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			}
+		}
 
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = resp.Body.Close() }()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return 0, err
+		}
+		req.Header.Set("User-Agent", c.ua)
+		req.Header.Set("Accept", "text/html,application/xhtml+xml")
+		req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 
-	if resp.StatusCode == http.StatusNotFound {
-		return 0, ErrNotFound
-	}
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("lastfm: HTTP %d for %q", resp.StatusCode, endpoint)
-	}
+		resp, err := c.http.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
 
-	// Cap body reads at 1 MiB — artist pages are ~300-500 KB in practice; a
-	// runaway would otherwise make a single lookup dominate the poll tick.
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return 0, fmt.Errorf("lastfm: read body: %w", err)
-	}
+		if resp.StatusCode == http.StatusNotFound {
+			_ = resp.Body.Close()
+			return 0, ErrNotFound
+		}
+		if resp.StatusCode == http.StatusBadGateway ||
+			resp.StatusCode == http.StatusServiceUnavailable ||
+			resp.StatusCode == http.StatusGatewayTimeout {
+			_ = resp.Body.Close()
+			lastErr = fmt.Errorf("lastfm: transient HTTP %d for %q", resp.StatusCode, endpoint)
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			return 0, fmt.Errorf("lastfm: HTTP %d for %q", resp.StatusCode, endpoint)
+		}
 
-	n, err := extractListeners(string(body))
-	if err != nil {
-		return 0, err
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		_ = resp.Body.Close()
+		if err != nil {
+			lastErr = fmt.Errorf("lastfm: read body: %w", err)
+			continue
+		}
+
+		n, perr := extractListeners(string(body))
+		if perr != nil {
+			return 0, perr
+		}
+		_ = attempt
+		return n, nil
 	}
-	return n, nil
+	if lastErr == nil {
+		lastErr = errors.New("lastfm: all retries exhausted")
+	}
+	return 0, lastErr
 }
 
 // extractListeners finds the listener count in a Last.fm artist page. The

@@ -17,11 +17,13 @@ const (
 	// lastfmCacheTTL — refetch a cached artist after this long.
 	lastfmCacheTTL = 30 * 24 * time.Hour
 	// lastfmConcurrency — max parallel Last.fm lookups per enrichment pass.
-	// Low ceiling keeps us polite on their servers and fits inside the
-	// rule-handling path's overall budget.
-	lastfmConcurrency = 4
-	// lastfmPerRequestTimeout — hard cap on a single Last.fm fetch.
-	lastfmPerRequestTimeout = 5 * time.Second
+	// Kept deliberately low; Last.fm's front-end returns 502s under burst
+	// load. 2 is polite, still fast enough to enrich 40-80 entries inside
+	// the overall budget.
+	lastfmConcurrency = 2
+	// lastfmPerRequestTimeout — hard cap on a single Last.fm fetch including
+	// the internal retry-on-502 backoff (2 retries × 0.9s + request time).
+	lastfmPerRequestTimeout = 8 * time.Second
 	// lastfmTotalBudget — cap the whole enrichment pass so a thread with
 	// 200 artists can't stall a Discord interaction. Entries that don't
 	// complete in time keep Listeners=0.
