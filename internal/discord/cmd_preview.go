@@ -152,12 +152,24 @@ func (c *Client) buildPreview(ctx ctxpkg.Ctx, channelExternalID, urlOrID string)
 		return nil, "", fmt.Errorf("subreddit lookup: %w", err)
 	}
 
-	phoenix := c.now().In(c.loc)
-	dayLocal := time.Date(phoenix.Year(), phoenix.Month(), phoenix.Day(), 0, 0, 0, 0, time.UTC)
-
-	existing, err := c.Bot.Store.GetRollingPost(ctx, ch.ID, subreddit.ID, dayLocal)
+	windowHours := rule.WindowHours
+	if windowHours <= 0 {
+		windowHours = c.defaultWindowHours
+	}
+	if windowHours <= 0 {
+		windowHours = 72
+	}
+	existing, err := c.Bot.Store.GetActiveRollingPost(ctx, ch.ID, subreddit.ID, windowHours)
 	if err != nil {
-		return nil, "", fmt.Errorf("rolling-post lookup: %w", err)
+		return nil, "", fmt.Errorf("active rolling-post lookup: %w", err)
+	}
+
+	var dayLocal time.Time
+	if existing != nil {
+		dayLocal = existing.DayLocal
+	} else {
+		phoenix := c.now().In(c.loc)
+		dayLocal = time.Date(phoenix.Year(), phoenix.Month(), phoenix.Day(), 0, 0, 0, 0, time.UTC)
 	}
 
 	mode := rule.Mode
@@ -171,10 +183,11 @@ func (c *Client) buildPreview(ctx ctxpkg.Ctx, channelExternalID, urlOrID string)
 		PostID:    0, // preview: never written to DB
 		Post:      post,
 		Rule: &dbstore.Rule{
-			ID:       rule.ID,
-			TargetID: rule.TargetID,
-			Exact:    rule.Exact,
-			Mode:     mode,
+			ID:          rule.ID,
+			TargetID:    rule.TargetID,
+			Exact:       rule.Exact,
+			Mode:        mode,
+			WindowHours: windowHours,
 		},
 	}
 

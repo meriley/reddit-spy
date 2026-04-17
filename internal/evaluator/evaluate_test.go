@@ -185,9 +185,12 @@ func (m *mockStore) GetSubreddits(_ context.Context) ([]*dbstore.Subreddit, erro
 func (m *mockStore) GetNotificationCount(_ context.Context, _, _, _ int) (int, error) {
 	return 0, nil
 }
-func (m *mockStore) GetRollingPost(_ context.Context, _, _ int, _ time.Time) (*dbstore.RollingPost, error) {
+func (m *mockStore) GetActiveRollingPost(_ context.Context, _, _, _ int) (*dbstore.RollingPost, error) {
 	return nil, nil
 }
 func (m *mockStore) UpsertRollingPost(_ context.Context, _ dbstore.RollingPost) (*dbstore.RollingPost, error) {
 	return nil, nil
+}
+func (m *mockStore) UpdateRuleWindowHours(_ context.Context, _, _ int) error {
+	return nil
 }

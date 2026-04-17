@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 
@@ -60,6 +61,14 @@ func main() {
 	discordOpts := []discord.Option{}
 	if shaper := newShaper(appCtx); shaper != nil {
 		discordOpts = append(discordOpts, discord.WithShaper(shaper))
+	}
+	if raw := os.Getenv("DIGEST_DEFAULT_WINDOW_HOURS"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			discordOpts = append(discordOpts, discord.WithDefaultWindowHours(n))
+			_ = level.Info(appCtx.Log()).Log("msg", "digest default window configured", "hours", n)
+		} else {
+			_ = level.Warn(appCtx.Log()).Log("msg", "ignoring malformed DIGEST_DEFAULT_WINDOW_HOURS", "raw", raw)
+		}
 	}
 	// Music-mode popularity sort: keyless Last.fm artist-page scrape with a
 	// Postgres-backed cache. Always on — failures are soft and the digest

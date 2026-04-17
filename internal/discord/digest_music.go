@@ -71,6 +71,11 @@ func buildMusicRollingPost(
 			return rp, nil, err
 		}
 		prior = decoded
+		// Carry the existing row's identity and opening-time fields so
+		// UpsertRollingPost takes the UPDATE-by-id path.
+		rp.ID = existing.ID
+		rp.WindowStart = existing.WindowStart
+		rp.DayLocal = existing.DayLocal
 		rp.DiscordMessageIDs = append([]string(nil), existing.DiscordMessageIDs...)
 		rp.IncludedPostIDs = appendUnique(existing.IncludedPostIDs, result.Post.ID)
 		rp.IncludedRuleIDs = appendUniqueInt(existing.IncludedRuleIDs, result.RuleID)

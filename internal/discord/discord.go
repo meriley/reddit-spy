@@ -92,6 +92,23 @@ type Client struct {
 
 	// now is injectable for deterministic tests. Defaults to time.Now.
 	now func() time.Time
+
+	// defaultWindowHours is the fallback rolling-digest window when a rule's
+	// own window_hours column is 0 (shouldn't happen post-migration, but
+	// belt-and-braces). Configured from DIGEST_DEFAULT_WINDOW_HOURS env.
+	defaultWindowHours int
+}
+
+// effectiveWindowHours returns the rolling-digest window for a matched rule,
+// falling back to the cluster default when the rule's own column is unset.
+func effectiveWindowHours(rule *dbstore.Rule, defaultHours int) int {
+	if rule != nil && rule.WindowHours > 0 {
+		return rule.WindowHours
+	}
+	if defaultHours > 0 {
+		return defaultHours
+	}
+	return 72
 }
 
 // Option configures optional Client fields post-construction.
@@ -139,6 +156,16 @@ func WithQobuz(q *qobuz.Client) Option {
 	return func(c *Client) { c.qobuz = q }
 }
 
+// WithDefaultWindowHours sets the fallback rolling-digest window length
+// applied when a rule's own window_hours column is 0. Defaults to 72h.
+func WithDefaultWindowHours(h int) Option {
+	return func(c *Client) {
+		if h > 0 {
+			c.defaultWindowHours = h
+		}
+	}
+}
+
 func New(ctx ctxpkg.Ctx, bot *redditDiscordBot.RedditDiscordBot, opts ...Option) (*Client, error) {
 	token := os.Getenv("DISCORD_TOKEN")
 	if token == "" {
@@ -165,12 +192,13 @@ func New(ctx ctxpkg.Ctx, bot *redditDiscordBot.RedditDiscordBot, opts ...Option)
 	}
 
 	client := &Client{
-		Ctx:    ctx,
-		Client: dg,
-		Bot:    bot,
-		sender: dg,
-		loc:    loc,
-		now:    time.Now,
+		Ctx:                ctx,
+		Client:             dg,
+		Bot:                bot,
+		sender:             dg,
+		loc:                loc,
+		now:                time.Now,
+		defaultWindowHours: 72,
 	}
 	for _, opt := range opts {
 		opt(client)
@@ -188,10 +216,11 @@ func New(ctx ctxpkg.Ctx, bot *redditDiscordBot.RedditDiscordBot, opts ...Option)
 func NewForTest(ctx ctxpkg.Ctx, bot *redditDiscordBot.RedditDiscordBot, opts ...Option) *Client {
 	loc, _ := time.LoadLocation(PhoenixTZ)
 	c := &Client{
-		Ctx: ctx,
-		Bot: bot,
-		loc: loc,
-		now: time.Now,
+		Ctx:                ctx,
+		Bot:                bot,
+		loc:                loc,
+		now:                time.Now,
+		defaultWindowHours: 72,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -264,20 +293,26 @@ func (c *Client) SendMessage(ctx ctxpkg.Ctx, result *evaluator.MatchingEvaluatio
 		return fmt.Errorf("failed to get discord channel for id %d: %w", result.ChannelID, err)
 	}
 
-	// Derive the Phoenix calendar day directly from Y/M/D — Truncate(24h) would
-	// snap to UTC midnight, not Phoenix midnight, shifting the day backwards
-	// for wall-clock mornings UTC.
-	phoenix := c.now().In(c.loc)
-	dayLocal := time.Date(phoenix.Year(), phoenix.Month(), phoenix.Day(), 0, 0, 0, 0, time.UTC)
-
 	subreddit, err := c.Bot.Store.GetSubredditByExternalID(ctx, result.Post.Subreddit)
 	if err != nil {
 		return fmt.Errorf("failed to get subreddit %q: %w", result.Post.Subreddit, err)
 	}
 
-	existing, err := c.Bot.Store.GetRollingPost(ctx, result.ChannelID, subreddit.ID, dayLocal)
+	windowHours := effectiveWindowHours(result.Rule, c.defaultWindowHours)
+	existing, err := c.Bot.Store.GetActiveRollingPost(ctx, result.ChannelID, subreddit.ID, windowHours)
 	if err != nil {
-		return fmt.Errorf("failed to fetch rolling post: %w", err)
+		return fmt.Errorf("failed to fetch active rolling post: %w", err)
+	}
+
+	// dayLocal is now used only for new-digest footer rendering. For an
+	// existing window we carry the original opening-day value so the footer
+	// date stays stable across same-window updates.
+	var dayLocal time.Time
+	if existing != nil {
+		dayLocal = existing.DayLocal
+	} else {
+		phoenix := c.now().In(c.loc)
+		dayLocal = time.Date(phoenix.Year(), phoenix.Month(), phoenix.Day(), 0, 0, 0, 0, time.UTC)
 	}
 
 	// Dispatch by rule.Mode. Unrecognised modes (or legacy nil) fall through
@@ -423,6 +458,12 @@ func buildRollingPostRow(
 		LatestThumbnail:  result.Post.Thumbnail,
 	}
 	if existing != nil {
+		// Preserve the existing row's identity — UpsertRollingPost keys on
+		// ID (>0 → UPDATE), and window_start/day_local stay fixed through
+		// the lifetime of the window.
+		rp.ID = existing.ID
+		rp.WindowStart = existing.WindowStart
+		rp.DayLocal = existing.DayLocal
 		rp.DiscordMessageIDs = append([]string(nil), existing.DiscordMessageIDs...)
 		rp.Mode = existing.Mode
 		rp.IncludedPostIDs = appendUnique(existing.IncludedPostIDs, result.Post.ID)

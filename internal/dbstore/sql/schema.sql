@@ -36,9 +36,11 @@ CREATE TABLE IF NOT EXISTS rules (
     channel_id   INT  NOT NULL REFERENCES discord_channels(id) ON DELETE CASCADE,
     subreddit_id INT  NOT NULL REFERENCES subreddits(id)       ON DELETE CASCADE,
     mode         TEXT NOT NULL DEFAULT 'narrative',
+    window_hours INT  NOT NULL DEFAULT 72,
     created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 ALTER TABLE rules ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'narrative';
+ALTER TABLE rules ADD COLUMN IF NOT EXISTS window_hours INT NOT NULL DEFAULT 72;
 CREATE INDEX IF NOT EXISTS rules_subreddit_id_idx ON rules(subreddit_id);
 CREATE INDEX IF NOT EXISTS rules_channel_id_idx   ON rules(channel_id);
 
@@ -57,14 +59,17 @@ CREATE TABLE IF NOT EXISTS notifications (
     UNIQUE (post_id, channel_id, rule_id)
 );
 
--- Rolling daily digest — one row per (channel, subreddit, day_local). The
--- day is computed in America/Phoenix at match-handling time; all matches from
--- the same subreddit on the same Phoenix day update the same Discord message.
+-- Rolling digest — one row per "active window" for (channel, subreddit).
+-- window_start stamps when the digest opened; the row stays the active target
+-- for new matches until now() - window_start exceeds the rule's window_hours,
+-- at which point a subsequent match opens a fresh row. day_local is retained
+-- for display in the footer + legacy log-lines only (no longer a unique key).
 CREATE TABLE IF NOT EXISTS rolling_posts (
     id                  SERIAL PRIMARY KEY,
     channel_id          INT  NOT NULL REFERENCES discord_channels(id) ON DELETE CASCADE,
     subreddit_id        INT  NOT NULL REFERENCES subreddits(id)       ON DELETE CASCADE,
     day_local           DATE NOT NULL,
+    window_start        TIMESTAMPTZ NOT NULL DEFAULT now(),
     mode                TEXT NOT NULL DEFAULT 'narrative',
     discord_message_id  TEXT NOT NULL DEFAULT '',            -- legacy; use discord_message_ids
     discord_message_ids TEXT[] NOT NULL DEFAULT '{}',        -- first + any spill messages
@@ -77,13 +82,23 @@ CREATE TABLE IF NOT EXISTS rolling_posts (
     latest_comments     INT  NOT NULL DEFAULT 0,
     latest_url          TEXT NOT NULL DEFAULT '',
     latest_thumbnail    TEXT NOT NULL DEFAULT '',
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (channel_id, subreddit_id, day_local)
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 -- Columns added after v2.1 — idempotent for existing deploys.
-ALTER TABLE rolling_posts ADD COLUMN IF NOT EXISTS mode                TEXT   NOT NULL DEFAULT 'narrative';
-ALTER TABLE rolling_posts ADD COLUMN IF NOT EXISTS discord_message_ids TEXT[] NOT NULL DEFAULT '{}';
-ALTER TABLE rolling_posts ADD COLUMN IF NOT EXISTS entries             JSONB  NOT NULL DEFAULT '[]';
+ALTER TABLE rolling_posts ADD COLUMN IF NOT EXISTS mode                TEXT        NOT NULL DEFAULT 'narrative';
+ALTER TABLE rolling_posts ADD COLUMN IF NOT EXISTS discord_message_ids TEXT[]      NOT NULL DEFAULT '{}';
+ALTER TABLE rolling_posts ADD COLUMN IF NOT EXISTS entries             JSONB       NOT NULL DEFAULT '[]';
+ALTER TABLE rolling_posts ADD COLUMN IF NOT EXISTS window_start        TIMESTAMPTZ NOT NULL DEFAULT now();
+-- Backfill window_start for pre-window rows to approximate their original
+-- Phoenix-midnight start (day_local 00:00 MST ≈ 07:00 UTC). Only touches rows
+-- whose window_start was just defaulted by the ALTER (i.e. within the last
+-- 10 minutes) — a second run of schema.sql after startup is a no-op.
+UPDATE rolling_posts
+SET    window_start = day_local::timestamptz + INTERVAL '7 hours'
+WHERE  window_start > now() - INTERVAL '10 minutes';
+-- The day-based uniqueness no longer matches the new key shape — drop it so
+-- a second same-day match can open a new window-bounded row if needed.
+ALTER TABLE rolling_posts DROP CONSTRAINT IF EXISTS rolling_posts_channel_id_subreddit_id_day_local_key;
 -- Backfill the new array from the legacy scalar if the array is empty.
 UPDATE rolling_posts
 SET    discord_message_ids = ARRAY[discord_message_id]
@@ -100,6 +115,9 @@ ALTER TABLE rolling_posts DROP CONSTRAINT IF EXISTS rolling_posts_discord_messag
 ALTER TABLE rolling_posts ALTER COLUMN discord_message_id DROP NOT NULL;
 ALTER TABLE rolling_posts ALTER COLUMN discord_message_id SET DEFAULT '';
 CREATE INDEX IF NOT EXISTS rolling_posts_day_idx ON rolling_posts(day_local);
+-- Optimises the "latest active digest for (channel, sub)" lookup path.
+CREATE INDEX IF NOT EXISTS rolling_posts_active_idx
+  ON rolling_posts (channel_id, subreddit_id, window_start DESC);
 
 -- Last.fm listener-count + tags cache. artist_key is the normalized artist
 -- name (case-folded, single-spaced, trimmed). Stale rows (> 30 days) get

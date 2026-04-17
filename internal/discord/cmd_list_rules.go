@@ -47,8 +47,12 @@ func (c *Client) listRulesHandler(s *discordgo.Session, i *discordgo.Interaction
 		if mode == "" {
 			mode = "narrative"
 		}
-		lines = append(lines, fmt.Sprintf("**#%d** — r/%s | %s %s match on `%s` · `%s`",
-			r.ID, r.Subreddit, r.TargetID, matchType, r.Target, mode))
+		window := r.WindowHours
+		if window <= 0 {
+			window = 72
+		}
+		lines = append(lines, fmt.Sprintf("**#%d** — r/%s | %s %s match on `%s` · `%s` · window=`%dh`",
+			r.ID, r.Subreddit, r.TargetID, matchType, r.Target, mode, window))
 	}
 
 	embed := &discordgo.MessageEmbed{

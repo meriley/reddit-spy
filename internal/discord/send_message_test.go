@@ -24,7 +24,9 @@ import (
 type fakeStore struct {
 	mu                sync.Mutex
 	notificationCount map[string]int
-	rolling           map[string]*dbstore.RollingPost
+	rolling           []*dbstore.RollingPost
+	nextRollingID     int
+	nowFn             func() time.Time // matches the Client's injected clock when set
 	channels          map[int]*dbstore.DiscordChannel
 	subreddits        map[string]*dbstore.Subreddit
 	notifyCalls       int
@@ -34,14 +36,17 @@ type fakeStore struct {
 func newFakeStore() *fakeStore {
 	return &fakeStore{
 		notificationCount: map[string]int{},
-		rolling:           map[string]*dbstore.RollingPost{},
 		channels:          map[int]*dbstore.DiscordChannel{1: {ID: 1, ExternalID: "ext-chan-1"}},
 		subreddits:        map[string]*dbstore.Subreddit{"Metalcore": {ID: 10, ExternalID: "metalcore"}},
+		nowFn:             time.Now,
 	}
 }
 
-func rollingKey(channelID, subredditID int, day time.Time) string {
-	return fmt.Sprintf("%s|%d|%d", day.Format("2006-01-02"), channelID, subredditID)
+func (s *fakeStore) now() time.Time {
+	if s.nowFn != nil {
+		return s.nowFn()
+	}
+	return time.Now()
 }
 
 func notifKey(postID, channelID, ruleID int) string {
@@ -74,19 +79,57 @@ func (s *fakeStore) GetSubredditByExternalID(_ context.Context, name string) (*d
 	}
 	return sr, nil
 }
-func (s *fakeStore) GetRollingPost(_ context.Context, channelID, subredditID int, day time.Time) (*dbstore.RollingPost, error) {
+func (s *fakeStore) GetActiveRollingPost(_ context.Context, channelID, subredditID, windowHours int) (*dbstore.RollingPost, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.rolling[rollingKey(channelID, subredditID, day)], nil
+	now := s.now()
+	var latest *dbstore.RollingPost
+	for _, rp := range s.rolling {
+		if rp.ChannelID != channelID || rp.SubredditID != subredditID {
+			continue
+		}
+		closesAt := rp.WindowStart.Add(time.Duration(windowHours) * time.Hour)
+		if !closesAt.After(now) {
+			continue
+		}
+		if latest == nil || rp.WindowStart.After(latest.WindowStart) {
+			latest = rp
+		}
+	}
+	if latest == nil {
+		return nil, nil
+	}
+	// Return a copy so callers can't mutate the store's backing slice.
+	cp := *latest
+	return &cp, nil
 }
+
 func (s *fakeStore) UpsertRollingPost(_ context.Context, rp dbstore.RollingPost) (*dbstore.RollingPost, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.upsertCalls++
-	stored := rp
-	stored.ID = 1
-	s.rolling[rollingKey(rp.ChannelID, rp.SubredditID, rp.DayLocal)] = &stored
-	return &stored, nil
+	if rp.ID == 0 {
+		s.nextRollingID++
+		rp.ID = s.nextRollingID
+		if rp.WindowStart.IsZero() {
+			rp.WindowStart = s.now()
+		}
+		stored := rp
+		s.rolling = append(s.rolling, &stored)
+		return &stored, nil
+	}
+	for i, existing := range s.rolling {
+		if existing.ID != rp.ID {
+			continue
+		}
+		// Preserve identity fields the real UPDATE doesn't touch.
+		rp.WindowStart = existing.WindowStart
+		rp.DayLocal = existing.DayLocal
+		stored := rp
+		s.rolling[i] = &stored
+		return &stored, nil
+	}
+	return nil, fmt.Errorf("fakeStore: rolling_post id=%d not found", rp.ID)
 }
 
 // --- Store interface no-ops (not exercised by SendMessage) ---
@@ -127,6 +170,7 @@ func (s *fakeStore) GetRuleByID(_ context.Context, _ int) (*dbstore.RuleDetail, 
 func (s *fakeStore) DeleteRule(_ context.Context, _ int) error                   { return nil }
 func (s *fakeStore) UpdateRule(_ context.Context, _ int, _ string, _ bool) error { return nil }
 func (s *fakeStore) UpdateRuleMode(_ context.Context, _ int, _ string) error     { return nil }
+func (s *fakeStore) UpdateRuleWindowHours(_ context.Context, _ int, _ int) error { return nil }
 func (s *fakeStore) GetLastfmListeners(_ context.Context, _ string) (int, time.Time, bool, error) {
 	return 0, time.Time{}, false, nil
 }
@@ -206,7 +250,10 @@ func appCtx(t *testing.T) ctxpkg.Ctx {
 	return ctxpkg.New(context.Background())
 }
 
-func buildClient(store dbstore.Store, sender MessageSender, shaper Shaper, now func() time.Time) *Client {
+func buildClient(store *fakeStore, sender MessageSender, shaper Shaper, now func() time.Time) *Client {
+	// Keep the store's clock in sync with the Client's injected clock so
+	// GetActiveRollingPost's window math sees the same "now" SendMessage does.
+	store.nowFn = now
 	bot := &redditDiscordBot.RedditDiscordBot{Store: store}
 	return NewForTest(
 		ctxpkg.New(context.Background()),
@@ -290,32 +337,38 @@ func TestSendMessage_SameDaySecondMatchEdits(t *testing.T) {
 	}
 }
 
-func TestSendMessage_NextDaySendsNewMessage(t *testing.T) {
+// TestSendMessage_PastWindowSendsNewMessage pins the new window-based
+// grouping: a match arriving AFTER window_hours have elapsed since the first
+// match's window_start opens a new rolling_post (new Discord send) instead
+// of editing the old one.
+func TestSendMessage_PastWindowSendsNewMessage(t *testing.T) {
 	store := newFakeStore()
 	sender := &fakeSender{nextMsgID: "msg-1"}
 	shaper := &fakeShaper{
 		freshOut:  llm.Output{Title: "T", Summary: "S"},
 		updateOut: llm.Output{Title: "U", Summary: "u"},
 	}
-	day1 := time.Date(2026, 4, 16, 14, 0, 0, 0, time.UTC) // 07:00 Phoenix day 1
-	day2 := time.Date(2026, 4, 17, 8, 0, 0, 0, time.UTC)  // 01:00 Phoenix day 2 (Phoenix midnight = 07:00 UTC)
-	clock := day1
+	t0 := time.Date(2026, 4, 16, 14, 0, 0, 0, time.UTC)
+	// Default rule.WindowHours is 0 in the fake → effective default is 72h.
+	// Second match 80h later is past the window.
+	t1 := t0.Add(80 * time.Hour)
+	clock := t0
 	now := func() time.Time { return clock }
 	c := buildClient(store, sender, shaper, now)
 
 	if err := c.SendMessage(appCtx(t), newMatch(100, 2, &redditJSON.RedditPost{ID: "p1", Subreddit: "Metalcore", Title: "t1"})); err != nil {
-		t.Fatalf("day1 SendMessage: %v", err)
+		t.Fatalf("first SendMessage: %v", err)
 	}
 	sender.nextMsgID = "msg-2"
-	clock = day2
+	clock = t1
 	if err := c.SendMessage(appCtx(t), newMatch(101, 2, &redditJSON.RedditPost{ID: "p2", Subreddit: "Metalcore", Title: "t2"})); err != nil {
-		t.Fatalf("day2 SendMessage: %v", err)
+		t.Fatalf("post-window SendMessage: %v", err)
 	}
 	if sender.sendCalls != 2 {
-		t.Errorf("sendCalls=%d, want 2 (one per day)", sender.sendCalls)
+		t.Errorf("sendCalls=%d, want 2 (one per window)", sender.sendCalls)
 	}
 	if sender.editCalls != 0 {
-		t.Errorf("editCalls=%d, want 0 across a day boundary", sender.editCalls)
+		t.Errorf("editCalls=%d, want 0 across a window boundary", sender.editCalls)
 	}
 	if shaper.freshCalls != 2 {
 		t.Errorf("freshCalls=%d, want 2", shaper.freshCalls)
@@ -351,7 +404,7 @@ func TestSendMessage_EditFallsBackWhenMessageDeleted(t *testing.T) {
 		t.Errorf("sendCalls=%d, want 2 (fresh + fallback)", sender.sendCalls)
 	}
 	// After fallback, stored message_id should point at the replacement.
-	rp, _ := store.GetRollingPost(context.Background(), 1, 10, time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC))
+	rp, _ := store.GetActiveRollingPost(context.Background(), 1, 10, 72)
 	if rp == nil {
 		t.Fatal("rolling post row missing after fallback")
 		return
@@ -383,33 +436,44 @@ func TestSendMessage_DedupeShortCircuits(t *testing.T) {
 	}
 }
 
-// TestSendMessage_PhoenixDayBoundaryEarlyUTCMorning pins the Phoenix-day
-// contract: 03:00 UTC on day N is 20:00 on day N-1 in Phoenix, so the match
-// must land in day N-1's digest, not day N's. If someone "cleans up" SendMessage
-// by calling time.Now().UTC().Truncate(24h) this test breaks immediately.
-func TestSendMessage_PhoenixDayBoundaryEarlyUTCMorning(t *testing.T) {
+// TestSendMessage_WindowBoundary_CrossingClockMidnight pins the new window
+// semantics: crossing Phoenix midnight WITHIN the same 72h window should
+// still edit the existing digest (not open a new one). Under the old
+// day_local bucketing this would have been a "new day, new digest" event.
+func TestSendMessage_WindowBoundary_CrossingClockMidnight(t *testing.T) {
 	store := newFakeStore()
 	sender := &fakeSender{nextMsgID: "msg-1"}
-	shaper := &fakeShaper{freshOut: llm.Output{Title: "T", Summary: "S"}}
-	// 2026-04-16 03:00 UTC = 2026-04-15 20:00 MST
-	now := func() time.Time { return time.Date(2026, 4, 16, 3, 0, 0, 0, time.UTC) }
-	c := buildClient(store, sender, shaper, now)
+	shaper := &fakeShaper{
+		freshOut:  llm.Output{Title: "T", Summary: "S"},
+		updateOut: llm.Output{Title: "U", Summary: "u2"},
+	}
+	// 2026-04-16 20:00 Phoenix = 2026-04-17 03:00 UTC
+	t0 := time.Date(2026, 4, 17, 3, 0, 0, 0, time.UTC)
+	// 10h later = 2026-04-17 13:00 UTC = 2026-04-17 06:00 Phoenix (next local day)
+	t1 := t0.Add(10 * time.Hour)
+	clock := t0
+	c := buildClient(store, sender, shaper, func() time.Time { return clock })
 
-	err := c.SendMessage(appCtx(t), newMatch(100, 2, &redditJSON.RedditPost{
-		ID: "p1", Subreddit: "Metalcore", Title: "evening thread",
-	}))
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
+	if err := c.SendMessage(appCtx(t), newMatch(100, 2, &redditJSON.RedditPost{ID: "p1", Subreddit: "Metalcore", Title: "t1"})); err != nil {
+		t.Fatalf("first SendMessage: %v", err)
 	}
-	// The stored rolling post should live under 2026-04-15 (Phoenix day),
-	// not 2026-04-16 (UTC day).
-	rp15, _ := store.GetRollingPost(context.Background(), 1, 10, time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC))
-	rp16, _ := store.GetRollingPost(context.Background(), 1, 10, time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC))
-	if rp15 == nil {
-		t.Fatal("expected rolling_posts row for Phoenix day 2026-04-15; none stored")
+	clock = t1
+	if err := c.SendMessage(appCtx(t), newMatch(101, 2, &redditJSON.RedditPost{ID: "p2", Subreddit: "Metalcore", Title: "t2"})); err != nil {
+		t.Fatalf("second SendMessage: %v", err)
 	}
-	if rp16 != nil {
-		t.Errorf("unexpected rolling_posts row for UTC day 2026-04-16 — day rollover is Phoenix, not UTC")
+	if sender.sendCalls != 1 || sender.editCalls != 1 {
+		t.Errorf("send=%d edit=%d, want send=1 edit=1 (same window, same message)", sender.sendCalls, sender.editCalls)
+	}
+
+	// Still exactly one rolling_post row for this (channel, sub) in the
+	// default 72h window.
+	rp, _ := store.GetActiveRollingPost(context.Background(), 1, 10, 72)
+	if rp == nil {
+		t.Fatal("expected a rolling_posts row for the active 72h window")
+		return
+	}
+	if len(rp.IncludedPostIDs) != 2 {
+		t.Errorf("included_post_ids=%v, want 2 entries", rp.IncludedPostIDs)
 	}
 }
 

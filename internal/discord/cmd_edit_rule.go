@@ -45,6 +45,14 @@ func (c *Client) editRuleCommandConfig() CommandConfig {
 						{Name: "media (TODO)", Value: database.ModeMedia},
 					},
 				},
+				{
+					Name:        "combine_hits_hours",
+					Description: "New rolling-digest window in hours (leave empty to keep current)",
+					Required:    false,
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					MinValue:    ptrFloat(1),
+					MaxValue:    720,
+				},
 			},
 		},
 		Handler: c.editRuleHandler,
@@ -88,6 +96,10 @@ func (c *Client) editRuleHandler(s *discordgo.Session, i *discordgo.InteractionC
 	if newMode == "" {
 		newMode = database.ModeNarrative
 	}
+	newWindow := rule.WindowHours
+	if newWindow <= 0 {
+		newWindow = 72
+	}
 
 	for _, opt := range data.Options[1:] {
 		switch opt.Name {
@@ -107,12 +119,19 @@ func (c *Client) editRuleHandler(s *discordgo.Session, i *discordgo.InteractionC
 				}
 				newMode = v
 			}
+		case "combine_hits_hours":
+			if v, ok := opt.Value.(float64); ok && v > 0 {
+				newWindow = int(v)
+			}
 		}
 	}
 
-	unchanged := newTarget == rule.Target && newExact == rule.Exact && newMode == rule.Mode
+	unchanged := newTarget == rule.Target &&
+		newExact == rule.Exact &&
+		newMode == rule.Mode &&
+		newWindow == rule.WindowHours
 	if unchanged {
-		c.respondWithError(s, i, "No changes specified. Provide a new value, exact flag, or digest mode.")
+		c.respondWithError(s, i, "No changes specified. Provide a new value, exact flag, digest mode, or combine_hits_hours.")
 		return
 	}
 
@@ -130,6 +149,13 @@ func (c *Client) editRuleHandler(s *discordgo.Session, i *discordgo.InteractionC
 			return
 		}
 	}
+	if newWindow != rule.WindowHours {
+		if err := c.Bot.Store.UpdateRuleWindowHours(c.Ctx, ruleID, newWindow); err != nil {
+			_ = level.Error(c.Ctx.Log()).Log("error", "failed to update rule window_hours", "ruleID", ruleID, "err", err)
+			c.respondWithError(s, i, "Failed to update rule combine_hits_hours.")
+			return
+		}
+	}
 
 	matchType := "partial"
 	if newExact {
@@ -140,8 +166,8 @@ func (c *Client) editRuleHandler(s *discordgo.Session, i *discordgo.InteractionC
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Flags: discordgo.MessageFlagsEphemeral,
-			Content: fmt.Sprintf("Updated rule #%d: r/%s — %s %s match on `%s` · mode=%s",
-				ruleID, rule.Subreddit, rule.TargetID, matchType, newTarget, newMode),
+			Content: fmt.Sprintf("Updated rule #%d: r/%s — %s %s match on `%s` · mode=%s · window=%dh",
+				ruleID, rule.Subreddit, rule.TargetID, matchType, newTarget, newMode, newWindow),
 		},
 	})
 }

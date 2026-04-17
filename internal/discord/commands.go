@@ -67,8 +67,21 @@ func (c *Client) subredditListenerOptions() []*discordgo.ApplicationCommandOptio
 				{Name: "media (TODO)", Value: database.ModeMedia},
 			},
 		},
+		{
+			Name:        "combine_hits_hours",
+			Description: "How long (in hours) to keep folding new matches into the same digest. Default 72.",
+			Required:    false,
+			Type:        discordgo.ApplicationCommandOptionInteger,
+			MinValue:    ptrFloat(1),
+			MaxValue:    720,
+		},
 	}
 }
+
+// ptrFloat returns a pointer to the supplied float64. discordgo's
+// ApplicationCommandOption.MinValue is a *float64 (because integer options
+// still use the float schema on the wire), so an inline literal won't do.
+func ptrFloat(v float64) *float64 { return &v }
 
 func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if !c.hasManageChannels(s, i) {
@@ -123,6 +136,17 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 				return
 			}
 			rule.Mode = v
+		case "combine_hits_hours":
+			v, ok := option.Value.(float64)
+			if !ok {
+				c.respondWithError(s, i, "invalid combine_hits_hours value")
+				return
+			}
+			if v <= 0 {
+				c.respondWithError(s, i, "combine_hits_hours must be positive")
+				return
+			}
+			rule.WindowHours = int(v)
 		default:
 			_ = level.Error(c.Ctx.Log()).Log("error", "unexpected key",
 				"key", option.Name,
