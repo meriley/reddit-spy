@@ -1,0 +1,17 @@
+apiVersion: v2
+name: reddit-spy
+description: Reddit-to-Discord digest bot with in-cluster vLLM narrative shaping
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - reddit
+  - discord
+  - llm
+  - vllm
+  - ai
+home: https://gitea.cmtriley.com/mriley/reddit-spy
+maintainers:
+  - name: Pedro
+sources:
+  - https://gitea.cmtriley.com/mriley/reddit-spy

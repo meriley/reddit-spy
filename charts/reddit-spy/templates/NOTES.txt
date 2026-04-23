@@ -1,0 +1,16 @@
+Reddit-Spy is installed.
+
+1) Verify the pod is running:
+     kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/name=reddit-spy
+
+2) Tail logs to confirm startup + first LLM probe:
+     kubectl -n {{ .Release.Namespace }} logs -f deploy/{{ include "reddit-spy.fullname" . }}
+
+3) Expected startup log lines:
+     msg="starting reddit-spy" version=...
+     msg="llm enabled" base_url={{ .Values.llm.baseURL }} model={{ .Values.llm.model }}
+     msg="starting poller" subreddit=<name>   (one per configured subreddit)
+
+The bot polls Reddit and posts rolling daily digests to Discord. "Day" is
+computed in {{ .Values.tz }} — digest messages edit in place until midnight
+local time, then a fresh message is sent.

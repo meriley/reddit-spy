@@ -1,0 +1,91 @@
+# Default values for reddit-spy. Designed for the k3d-ai cluster; the ArgoCD
+# Application at clusters/k3d-ai/applications/reddit-spy.yaml overrides
+# anything environment-specific.
+
+image:
+  repository: gitea.cmtriley.com/mriley/reddit-spy
+  # Tag is pinned by the ArgoCD Application. "latest" is a fallback for local
+  # helm-install testing only.
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets:
+  - name: gitea-registry
+
+# All times in the bot are computed against this timezone. Arizona does not
+# observe DST so the offset is a stable UTC-7.
+tz: America/Phoenix
+
+logLevel: info
+
+llm:
+  baseURL: http://vllm.ai.svc.cluster.local:8000/v1
+  model: Qwen/Qwen3-14B-AWQ
+  timeout: 90s
+  # tone: one of "" (neutral), "snarky", "playful"
+  tone: ""
+  # Name of a secret holding the LLM API key under the "api-key" data key.
+  # vLLM accepts any token; a literal "EMPTY" is fine.
+  existingSecret: reddit-spy-llm
+  existingSecretKey: api-key
+
+# Piped API base URL for music-mode YouTube link enrichment. Leave empty to
+# disable (titles render as plain text). Public instance or an in-cluster
+# self-hosted Piped.
+pipedBaseURL: ""
+
+# Rolling-digest window cluster default — applied when a rule's own
+# window_hours column is 0 (pre-migration rows). Per-rule override via
+# /add_subreddit_listener combine_hits_hours and /edit_rule combine_hits_hours.
+digest:
+  defaultWindowHours: 72
+
+discord:
+  # Name of a secret holding the bot token under the "token" data key.
+  existingSecret: reddit-spy-discord
+  existingSecretKey: token
+
+postgres:
+  # DSN for the pre-existing postgres-ai service in the ai namespace.
+  address: postgres-ai.ai.svc.cluster.local:5432
+  database: reddit_spy
+  user: reddit_spy
+  # Name of a secret holding the DB password under the "password" data key.
+  existingSecret: reddit-spy-db-credentials
+  existingSecretKey: password
+  # Optional: POSTGRES_ADMIN_URL enables role+database bootstrap on first
+  # startup. Set to a sealed secret reference when the target server's
+  # reddit_spy role has not yet been provisioned. Unset after first deploy.
+  adminURLExistingSecret: ""
+  adminURLExistingSecretKey: admin-url
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}

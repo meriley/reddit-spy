@@ -1,0 +1,54 @@
+name: Release Helm Chart
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  REGISTRY: gitea.cmtriley.com
+  CHART_PATH: charts/reddit-spy
+
+jobs:
+  release-chart:
+    name: Package and Push Helm Chart
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Chart version: $VERSION"
+
+      - name: Update Chart.yaml version
+        run: |
+          sed -i "s/^version:.*/version: ${{ steps.version.outputs.version }}/" ${{ env.CHART_PATH }}/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${{ steps.version.outputs.version }}\"/" ${{ env.CHART_PATH }}/Chart.yaml
+          cat ${{ env.CHART_PATH }}/Chart.yaml
+
+      - name: Login to Gitea OCI Registry
+        run: |
+          echo "${{ secrets.TOKEN_GITEA }}" | helm registry login ${{ env.REGISTRY }} -u mriley --password-stdin
+
+      - name: Package Helm chart
+        run: |
+          helm package ${{ env.CHART_PATH }} --version ${{ steps.version.outputs.version }}
+          ls -la *.tgz
+
+      - name: Push to OCI registry
+        run: |
+          helm push reddit-spy-${{ steps.version.outputs.version }}.tgz oci://${{ env.REGISTRY }}/mriley
+          echo "Chart pushed to oci://${{ env.REGISTRY }}/mriley/reddit-spy:${{ steps.version.outputs.version }}"
+
+      - name: Verify chart in registry
+        run: |
+          helm show chart oci://${{ env.REGISTRY }}/mriley/reddit-spy --version ${{ steps.version.outputs.version }}

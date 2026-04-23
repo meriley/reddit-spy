@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "reddit-spy.fullname" . }}-config
+  labels:
+    {{- include "reddit-spy.labels" . | nindent 4 }}
+data:
+  TZ: {{ .Values.tz | quote }}
+  LOG_LEVEL: {{ .Values.logLevel | quote }}
+  LLM_BASE_URL: {{ .Values.llm.baseURL | quote }}
+  LLM_MODEL: {{ .Values.llm.model | quote }}
+  LLM_TIMEOUT: {{ .Values.llm.timeout | quote }}
+  {{- if .Values.llm.tone }}
+  LLM_TONE: {{ .Values.llm.tone | quote }}
+  {{- end }}
+  POSTGRES_ADDRESS: {{ .Values.postgres.address | quote }}
+  POSTGRES_DATABASE: {{ .Values.postgres.database | quote }}
+  POSTGRES_USER: {{ .Values.postgres.user | quote }}
+  {{- if .Values.pipedBaseURL }}
+  PIPED_BASE_URL: {{ .Values.pipedBaseURL | quote }}
+  {{- end }}
+  {{- if .Values.digest }}
+  {{- if .Values.digest.defaultWindowHours }}
+  DIGEST_DEFAULT_WINDOW_HOURS: {{ .Values.digest.defaultWindowHours | quote }}
+  {{- end }}
+  {{- end }}

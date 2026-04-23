@@ -119,11 +119,10 @@ jobs:
         run: |
           VALUES_FILE="charts/reddit-spy/values.yaml"
           if command -v yq &> /dev/null; then
-            yq -i '.image.tag = "${{ github.sha }}"' "$VALUES_FILE"
-            yq -i '.image.pullPolicy = "Always"' "$VALUES_FILE"
+            yq -i '.["reddit-spy"].image.tag = "${{ github.sha }}"' "$VALUES_FILE"
+            yq -i '.["reddit-spy"].image.pullPolicy = "Always"' "$VALUES_FILE"
           else
             sed -i 's|tag: ".*"|tag: "${{ github.sha }}"|' "$VALUES_FILE"
-            sed -i 's|pullPolicy: IfNotPresent|pullPolicy: Always|' "$VALUES_FILE"
           fi
 
       - name: Check for changes
