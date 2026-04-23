@@ -24,7 +24,7 @@ title plus a kind marker ("single" | "album" | "ep"). Treat lines that end
 with "(Album)" / "(LP)" as album, "(EP)" as ep, everything else as single.
 Keep any "feat. X" inside the title, not the artist. Skip section headers,
 playlists, and commentary. If the input contains no releases, return an
-empty entries array. Never invent entries that aren't in the post body. /no_think`
+empty entries array. Never invent entries that aren't in the post body.`
 
 // promptFresh builds the user prompt for the first matching post of a
 // (subreddit, Phoenix-day) pair.
@@ -120,7 +120,7 @@ Source post:
   body:
 %s
 
-Return ONLY the JSON object, nothing else. /no_think`,
+Return ONLY the JSON object, nothing else.`,
 		len(in.KnownEntries),
 		string(knownJSON),
 		in.Post.Author,

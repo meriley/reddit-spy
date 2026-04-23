@@ -77,9 +77,10 @@ func (s *Shaper) ShapeMusic(ctx context.Context, in MusicInput) ([]MusicEntry, e
 
 	prompt := promptMusicExtract(in)
 	req := openai.ChatCompletionRequest{
-		Model:       s.cfg.Model,
-		Temperature: 0.1,
-		MaxTokens:   predictMusicMaxTokens(in.Post.Selftext),
+		Model:              s.cfg.Model,
+		Temperature:        0.1,
+		MaxTokens:          predictMusicMaxTokens(in.Post.Selftext),
+		ChatTemplateKwargs: map[string]any{"enable_thinking": false},
 		Messages: []openai.ChatCompletionMessage{
 			{Role: openai.ChatMessageRoleSystem, Content: systemPromptMusic},
 			{Role: openai.ChatMessageRoleUser, Content: prompt},
