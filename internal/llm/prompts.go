@@ -120,7 +120,7 @@ Source post:
   body:
 %s
 
-Return ONLY the JSON object, nothing else.`,
+Return ONLY the JSON object, nothing else. /no_think`,
 		len(in.KnownEntries),
 		string(knownJSON),
 		in.Post.Author,
