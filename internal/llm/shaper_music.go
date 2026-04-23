@@ -12,6 +12,22 @@ import (
 	redditJSON "github.com/meriley/reddit-spy/internal/redditJSON"
 )
 
+const (
+	// musicTokensPerEntry is the estimated output tokens for one JSON entry.
+	musicTokensPerEntry = 25
+	// musicTokenSafetyFactor pads the estimate for longer artist/title names
+	// and feat. annotations.
+	musicTokenSafetyFactor = 1.5
+	// musicTokenOverhead covers the outer {"entries":[]} wrapper and whitespace.
+	musicTokenOverhead = 100
+	// musicMaxTokensFloor prevents a needlessly tiny budget on very short posts.
+	musicMaxTokensFloor = 512
+	// musicMaxTokensCeiling keeps generation within the LLM HTTP timeout.
+	// If your vLLM generates fewer than ~200 tok/s and a thread has 150+
+	// entries, raise LLM_TIMEOUT alongside this value.
+	musicMaxTokensCeiling = 6000
+)
+
 // MusicEntry is one extracted release from a Reddit music-thread body.
 // The bot stores these in rolling_posts.entries as a JSON array.
 type MusicEntry struct {
@@ -63,10 +79,7 @@ func (s *Shaper) ShapeMusic(ctx context.Context, in MusicInput) ([]MusicEntry, e
 	req := openai.ChatCompletionRequest{
 		Model:       s.cfg.Model,
 		Temperature: 0.1,
-		// Cap output so vLLM doesn't drift and blow the http timeout on a
-		// runaway completion. 3000 tokens fits ~100 JSON entries, which is
-		// more than any weekly-release thread produces in practice.
-		MaxTokens: 3000,
+		MaxTokens:   predictMusicMaxTokens(in.Post.Selftext),
 		Messages: []openai.ChatCompletionMessage{
 			{Role: openai.ChatMessageRoleSystem, Content: systemPromptMusic},
 			{Role: openai.ChatMessageRoleUser, Content: prompt},
@@ -85,16 +98,22 @@ func (s *Shaper) ShapeMusic(ctx context.Context, in MusicInput) ([]MusicEntry, e
 	raw := stripJSONFences(resp.Choices[0].Message.Content)
 
 	// The model must return a JSON object: `{"entries": [...]}`. A few models
-	// return the bare array, so accept both.
+	// return the bare array, so accept both. When the response is truncated
+	// (token cap mid-stream), attempt partial recovery from complete entries.
 	var obj struct {
 		Entries []MusicEntry `json:"entries"`
 	}
 	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
 		var arr []MusicEntry
 		if err2 := json.Unmarshal([]byte(raw), &arr); err2 != nil {
-			return nil, fmt.Errorf("parse llm music json: %w (raw=%.200s)", err, raw)
+			if entries, ok := recoverTruncatedEntries(raw); ok {
+				obj.Entries = entries
+			} else {
+				return nil, fmt.Errorf("parse llm music json: %w (raw=%.200s)", err, raw)
+			}
+		} else {
+			obj.Entries = arr
 		}
-		obj.Entries = arr
 	}
 
 	known := make(map[string]struct{}, len(in.KnownEntries))
@@ -156,6 +175,52 @@ func stripJSONFences(raw string) string {
 	raw = strings.TrimPrefix(raw, "```")
 	raw = strings.TrimSuffix(raw, "```")
 	return strings.TrimSpace(raw)
+}
+
+// predictMusicMaxTokens estimates the output token budget for a music
+// extraction call. Each non-empty line in the post body corresponds to roughly
+// one JSON entry; see the music* constants for the per-entry budget and clamp
+// values.
+func predictMusicMaxTokens(body string) int {
+	nonEmpty := 0
+	for _, line := range strings.Split(body, "\n") {
+		if strings.TrimSpace(line) != "" {
+			nonEmpty++
+		}
+	}
+	n := int(float64(nonEmpty)*musicTokensPerEntry*musicTokenSafetyFactor) + musicTokenOverhead
+	if n < musicMaxTokensFloor {
+		return musicMaxTokensFloor
+	}
+	if n > musicMaxTokensCeiling {
+		return musicMaxTokensCeiling
+	}
+	return n
+}
+
+// recoverTruncatedEntries salvages complete MusicEntry objects from a JSON
+// response that was cut off before the closing delimiter. Returns (entries,
+// true) when at least one entry was recovered; (nil, false) otherwise.
+func recoverTruncatedEntries(raw string) ([]MusicEntry, bool) {
+	lastBrace := strings.LastIndex(raw, "}")
+	if lastBrace < 0 {
+		return nil, false
+	}
+	base := raw[:lastBrace+1]
+
+	var obj struct {
+		Entries []MusicEntry `json:"entries"`
+	}
+	if err := json.Unmarshal([]byte(base+"]}"), &obj); err == nil && len(obj.Entries) > 0 {
+		return obj.Entries, true
+	}
+
+	var arr []MusicEntry
+	if err := json.Unmarshal([]byte(base+"]"), &arr); err == nil && len(arr) > 0 {
+		return arr, true
+	}
+
+	return nil, false
 }
 
 // stripThinkBlock removes any leading <think>…</think> reasoning block that

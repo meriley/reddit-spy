@@ -13,7 +13,13 @@ import (
 	redditJson "github.com/meriley/reddit-spy/internal/redditJSON"
 )
 
-const EvalChannelBuffer = 10
+const (
+	EvalChannelBuffer = 10
+
+	// maxConcurrentInserts caps the per-post rule fan-out so goroutines don't
+	// exhaust the pgxpool (default MaxConns = max(4, GOMAXPROCS)).
+	maxConcurrentInserts = 4
+)
 
 type RuleEvaluation struct {
 	store                   dbstore.Store
@@ -61,6 +67,7 @@ func (e *RuleEvaluation) Evaluate(
 		}
 
 		eg, egCtx := errgroup.WithContext(ctx)
+		eg.SetLimit(maxConcurrentInserts)
 		for _, r := range rules {
 			p := p
 			r := r
