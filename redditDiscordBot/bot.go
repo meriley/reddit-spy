@@ -1,25 +1,26 @@
 package redditDiscordBot
 
 import (
+	"context"
 	"fmt"
-	"net/http"
 	"sync"
 	"time"
 
 	ctx "github.com/meriley/reddit-spy/internal/context"
 	dbstore "github.com/meriley/reddit-spy/internal/dbstore"
+	"github.com/meriley/reddit-spy/internal/reddit"
 	"github.com/meriley/reddit-spy/internal/redditJSON"
 )
 
 const (
 	DefaultPollInterval = 30 * time.Second
-	DefaultHTTPTimeout  = 5 * time.Second
 	PollerChannelBuffer = 10
 )
 
 type RedditDiscordBot struct {
 	ctx                   ctx.Ctx
 	Store                 dbstore.Store
+	Reddit                *reddit.SpoofClient
 	StartedAt             time.Time
 	mu                    sync.RWMutex
 	pollers               map[int]*redditJSON.Poller
@@ -33,7 +34,7 @@ func (b *RedditDiscordBot) PollerCount() int {
 }
 
 func (b *RedditDiscordBot) AddSubredditPoller(
-	ctx ctx.Ctx,
+	c ctx.Ctx,
 	subreddit *dbstore.Subreddit,
 ) *redditJSON.Poller {
 	b.mu.Lock()
@@ -43,10 +44,10 @@ func (b *RedditDiscordBot) AddSubredditPoller(
 		return poller
 	}
 	poller := redditJSON.NewPoller(
-		ctx,
-		fmt.Sprintf("https://www.reddit.com/r/%s/.json", subreddit.ExternalID),
+		c,
+		b.Reddit,
+		subreddit.ExternalID,
 		DefaultPollInterval,
-		DefaultHTTPTimeout,
 	)
 	b.pollers[subreddit.ID] = poller
 	poller.Start(b.PollerResponseChannel)
@@ -64,56 +65,49 @@ func (b *RedditDiscordBot) Stop() {
 }
 
 func (b *RedditDiscordBot) CreateRule(
-	ctx ctx.Ctx,
+	c ctx.Ctx,
 	serverID string,
 	channelID string,
 	subredditID string,
 	rule dbstore.Rule,
 ) error {
-	s, err := b.Store.InsertDiscordServer(ctx, serverID)
+	s, err := b.Store.InsertDiscordServer(c, serverID)
 	if err != nil {
 		return fmt.Errorf("failed to insert discord server: %w", err)
 	}
-	c, err := b.Store.InsertDiscordChannel(ctx, channelID, s.ID)
+	ch, err := b.Store.InsertDiscordChannel(c, channelID, s.ID)
 	if err != nil {
 		return fmt.Errorf("failed to insert discord channel: %w", err)
 	}
-	sr, err := b.Store.InsertSubreddit(ctx, subredditID)
+	sr, err := b.Store.InsertSubreddit(c, subredditID)
 	if err != nil {
 		return fmt.Errorf("failed to insert subreddit: %w", err)
 	}
 	rule.DiscordServerID = s.ID
-	rule.DiscordChannelID = c.ID
+	rule.DiscordChannelID = ch.ID
 	rule.SubredditID = sr.ID
-	if _, err := b.Store.InsertRule(ctx, rule); err != nil {
+	if _, err := b.Store.InsertRule(c, rule); err != nil {
 		return fmt.Errorf("failed to insert rule: %w", err)
 	}
 	b.AddSubredditPoller(b.ctx, sr)
 	return nil
 }
 
-func ValidateSubredditExists(subreddit string) bool {
+// ValidateSubredditExists checks whether the given subreddit is accessible.
+// Returns false immediately for an empty name without making a network call.
+func (b *RedditDiscordBot) ValidateSubredditExists(ctx context.Context, subreddit string) bool {
 	if subreddit == "" {
 		return false
 	}
-	client := &http.Client{Timeout: DefaultHTTPTimeout}
-	req, err := http.NewRequest(http.MethodHead, fmt.Sprintf("https://www.reddit.com/r/%s/.json", subreddit), nil)
-	if err != nil {
-		return false
-	}
-	req.Header.Set("User-Agent", "reddit-spy/2.0 (github.com/meriley/reddit-spy)")
-	resp, err := client.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
+	_, _, err := b.Reddit.GetSubredditPosts(ctx, subreddit, "", 1)
+	return err == nil
 }
 
-func New(ctx ctx.Ctx, store dbstore.Store) (*RedditDiscordBot, error) {
+func New(c ctx.Ctx, store dbstore.Store) (*RedditDiscordBot, error) {
 	return &RedditDiscordBot{
-		ctx:                   ctx,
+		ctx:                   c,
 		Store:                 store,
+		Reddit:                reddit.NewSpoofClient(reddit.SpoofConfig{}),
 		StartedAt:             time.Now(),
 		pollers:               make(map[int]*redditJSON.Poller),
 		PollerResponseChannel: make(chan []*redditJSON.RedditPost, PollerChannelBuffer),

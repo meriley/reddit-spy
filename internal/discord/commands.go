@@ -9,7 +9,6 @@ import (
 	"github.com/go-kit/log/level"
 
 	database "github.com/meriley/reddit-spy/internal/dbstore"
-	"github.com/meriley/reddit-spy/redditDiscordBot"
 )
 
 var subredditPattern = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
@@ -166,7 +165,7 @@ func (c *Client) subredditListenerHandler(s *discordgo.Session, i *discordgo.Int
 		return
 	}
 
-	if !redditDiscordBot.ValidateSubredditExists(subredditID) {
+	if !c.Bot.ValidateSubredditExists(c.Ctx, subredditID) {
 		c.respondWithError(s, i, fmt.Sprintf("Subreddit r/%s does not exist or is not accessible.", subredditID))
 		return
 	}

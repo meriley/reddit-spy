@@ -1,13 +1,11 @@
 package redditJSON
 
 import (
-	"encoding/json"
-	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/go-kit/log/level"
 	ctx "github.com/meriley/reddit-spy/internal/context"
+	"github.com/meriley/reddit-spy/internal/reddit"
 )
 
 type PollerInterface interface {
@@ -16,20 +14,20 @@ type PollerInterface interface {
 }
 
 type Poller struct {
-	context    ctx.Ctx
-	httpClient *http.Client
-	url        string
-	interval   time.Duration
-	quit       chan struct{}
+	context   ctx.Ctx
+	client    *reddit.SpoofClient
+	subreddit string
+	interval  time.Duration
+	quit      chan struct{}
 }
 
-func NewPoller(ctx ctx.Ctx, url string, interval time.Duration, timeout time.Duration) *Poller {
+func NewPoller(c ctx.Ctx, client *reddit.SpoofClient, subreddit string, interval time.Duration) *Poller {
 	return &Poller{
-		context:    ctx,
-		url:        url,
-		httpClient: &http.Client{Timeout: timeout},
-		interval:   interval,
-		quit:       make(chan struct{}),
+		context:   c,
+		client:    client,
+		subreddit: subreddit,
+		interval:  interval,
+		quit:      make(chan struct{}),
 	}
 }
 
@@ -39,12 +37,28 @@ func (r *Poller) Start(c chan []*RedditPost) {
 		for {
 			select {
 			case <-ticker.C:
-				feed, err := r.getJSONEntries(r.url)
+				posts, _, err := r.client.GetSubredditPosts(r.context, r.subreddit, "", 25)
 				if err != nil {
 					_ = level.Error(r.context.Log()).Log("error", err.Error())
 					continue
 				}
-				c <- feed
+				result := make([]*RedditPost, 0, len(posts))
+				for _, p := range posts {
+					result = append(result, &RedditPost{
+						Author:      p.Author,
+						ID:          p.ID,
+						Permalink:   p.Permalink,
+						Selftext:    p.Selftext,
+						Subreddit:   p.Subreddit,
+						Thumbnail:   p.Thumbnail,
+						Title:       p.Title,
+						URL:         p.URL,
+						Score:       p.Score,
+						NumComments: p.NumComments,
+						CreatedUTC:  p.CreatedUTC,
+					})
+				}
+				c <- result
 			case <-r.quit:
 				ticker.Stop()
 				return
@@ -71,43 +85,4 @@ type (
 		NumComments int     `json:"num_comments"`
 		CreatedUTC  float64 `json:"created_utc"`
 	}
-	JSONEntryDataChildren struct {
-		Data *RedditPost `json:"data"`
-	}
-	JSONEntryData struct {
-		Children []*JSONEntryDataChildren `json:"children"`
-	}
-	JSONEntry struct {
-		Data JSONEntryData `json:"data"`
-	}
 )
-
-func (r *Poller) getJSONEntries(url string) ([]*RedditPost, error) {
-	req, err := http.NewRequestWithContext(r.context, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build request: %w", err)
-	}
-	req.Header.Set("User-Agent", "reddit-spy/2.0 (github.com/meriley/reddit-spy)")
-
-	resp, err := r.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("HTTP request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected HTTP status %d from %s", resp.StatusCode, url)
-	}
-
-	var entries JSONEntry
-	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
-		return nil, fmt.Errorf("failed to decode json: %w", err)
-	}
-
-	posts := make([]*RedditPost, 0, len(entries.Data.Children))
-	for _, child := range entries.Data.Children {
-		posts = append(posts, child.Data)
-	}
-
-	return posts, nil
-}

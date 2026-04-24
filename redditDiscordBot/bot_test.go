@@ -1,13 +1,19 @@
 package redditDiscordBot
 
 import (
+	"context"
 	"testing"
 
+	"github.com/meriley/reddit-spy/internal/reddit"
 	"github.com/meriley/reddit-spy/internal/redditJSON"
 )
 
 func TestValidateSubredditExists_Empty(t *testing.T) {
-	result := ValidateSubredditExists("")
+	bot := &RedditDiscordBot{
+		Reddit:  reddit.NewSpoofClient(reddit.SpoofConfig{}),
+		pollers: make(map[int]*redditJSON.Poller),
+	}
+	result := bot.ValidateSubredditExists(context.Background(), "")
 	if result {
 		t.Error("ValidateSubredditExists('') should return false")
 	}
