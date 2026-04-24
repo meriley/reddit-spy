@@ -46,10 +46,14 @@ func (c *Client) enrichMusicQobuzURLs(ctx ctxpkg.Ctx, entries []llm.MusicEntry) 
 		}
 		wg.Add(1)
 		i := i
-		sem <- struct{}{}
 		go func() {
 			defer wg.Done()
-			defer func() { <-sem }()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-budgetCtx.Done():
+				return
+			}
 			key := qobuz.QueryKey(out[i].Artist, out[i].Title)
 
 			cachedURL, fetchedAt, ok, err := c.Bot.Store.GetQobuzAlbum(budgetCtx, key)

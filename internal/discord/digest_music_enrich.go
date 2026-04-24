@@ -61,10 +61,14 @@ func (c *Client) enrichMusicListeners(ctx ctxpkg.Ctx, entries []llm.MusicEntry) 
 		}
 		wg.Add(1)
 		i := i
-		sem <- struct{}{}
 		go func() {
 			defer wg.Done()
-			defer func() { <-sem }()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-budgetCtx.Done():
+				return
+			}
 			key := lastfm.ArtistKey(out[i].Artist)
 
 			// Cache lookup first (new tags-aware call).
