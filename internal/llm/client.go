@@ -9,40 +9,45 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/sashabaranov/go-openai"
 )
 
 const (
-	EnvBaseURL = "LLM_BASE_URL"
-	EnvModel   = "LLM_MODEL"
-	EnvAPIKey  = "LLM_API_KEY"
-	EnvTimeout = "LLM_TIMEOUT"
-	EnvTone    = "LLM_TONE"
+	EnvBaseURL      = "LLM_BASE_URL"
+	EnvModel        = "LLM_MODEL"
+	EnvAPIKey       = "LLM_API_KEY"
+	EnvTimeout      = "LLM_TIMEOUT"
+	EnvTone         = "LLM_TONE"
+	EnvContextLimit = "LLM_CONTEXT_LIMIT"
 
-	DefaultTimeout    = 30 * time.Second
-	SummaryCharBudget = 3800
+	DefaultTimeout      = 30 * time.Second
+	DefaultContextLimit = 8192
+	SummaryCharBudget   = 3800
 )
 
 // Config captures everything the shaper needs to talk to the model.
 type Config struct {
-	BaseURL string
-	Model   string
-	APIKey  string
-	Timeout time.Duration
-	Tone    string
+	BaseURL      string
+	Model        string
+	APIKey       string
+	Timeout      time.Duration
+	Tone         string
+	ContextLimit int
 }
 
 // ConfigFromEnv reads Config from the process environment. Returns an error
 // if the required BaseURL or Model are missing or LLM_TIMEOUT is malformed.
 func ConfigFromEnv() (Config, error) {
 	cfg := Config{
-		BaseURL: os.Getenv(EnvBaseURL),
-		Model:   os.Getenv(EnvModel),
-		APIKey:  os.Getenv(EnvAPIKey),
-		Tone:    os.Getenv(EnvTone),
-		Timeout: DefaultTimeout,
+		BaseURL:      os.Getenv(EnvBaseURL),
+		Model:        os.Getenv(EnvModel),
+		APIKey:       os.Getenv(EnvAPIKey),
+		Tone:         os.Getenv(EnvTone),
+		Timeout:      DefaultTimeout,
+		ContextLimit: DefaultContextLimit,
 	}
 	if cfg.BaseURL == "" {
 		return cfg, fmt.Errorf("missing %s", EnvBaseURL)
@@ -56,6 +61,13 @@ func ConfigFromEnv() (Config, error) {
 			return cfg, fmt.Errorf("invalid %s=%q: %w", EnvTimeout, raw, err)
 		}
 		cfg.Timeout = d
+	}
+	if raw := os.Getenv(EnvContextLimit); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			return cfg, fmt.Errorf("invalid %s=%q: must be a positive integer", EnvContextLimit, raw)
+		}
+		cfg.ContextLimit = n
 	}
 	if cfg.APIKey == "" {
 		// vLLM accepts any token by default; the SDK refuses an empty one.

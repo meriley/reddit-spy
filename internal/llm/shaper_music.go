@@ -26,6 +26,12 @@ const (
 	// If your vLLM generates fewer than ~200 tok/s and a thread has 150+
 	// entries, raise LLM_TIMEOUT alongside this value.
 	musicMaxTokensCeiling = 6000
+
+	// charsPerToken is a conservative chars-per-token estimate for body sizing.
+	// Latin text typically runs 3–4 chars/token; 3 keeps estimates on the safe side.
+	charsPerToken = 3
+	// contextHeadroom reserves tokens for per-call model accounting overhead.
+	contextHeadroom = 200
 )
 
 // MusicEntry is one extracted release from a Reddit music-thread body.
@@ -66,20 +72,100 @@ type MusicInput struct {
 }
 
 // ShapeMusic asks the LLM to pull `{artist, title, kind}` entries out of the
-// post body. Returns only entries whose normalized (artist, title, kind) keys
-// are NOT already in KnownEntries. On any LLM error the shaper returns an
-// error — callers should fall back to leaving the digest unchanged rather
-// than synthesising entries.
+// post body. When the combined input (skip list + body + template) would exceed
+// the model's context window, the body is split across multiple sequential
+// calls and the results are accumulated. Returns only entries whose normalized
+// (artist, title, kind) keys are NOT already in KnownEntries. On any LLM
+// error the shaper returns an error — callers should fall back to leaving the
+// digest unchanged rather than synthesising entries.
 func (s *Shaper) ShapeMusic(ctx context.Context, in MusicInput) ([]MusicEntry, error) {
 	if in.Post == nil {
 		return nil, errors.New("llm.ShapeMusic: Post is nil")
 	}
 
-	prompt := promptMusicExtract(in)
+	// known grows across chunks so later calls dedup against earlier results.
+	known := make([]MusicEntry, len(in.KnownEntries))
+	copy(known, in.KnownEntries)
+
+	var accumulated []MusicEntry
+	remaining := in.Post.Selftext
+	for remaining != "" {
+		chunkIn := MusicInput{
+			Post:         in.Post,
+			KnownEntries: known,
+			RuleID:       in.RuleID,
+			RuleTargetID: in.RuleTargetID,
+			RuleExact:    in.RuleExact,
+		}
+		chunk, rest := s.takeBodyChunk(chunkIn, remaining)
+
+		p := *in.Post
+		p.Selftext = chunk
+		chunkIn.Post = &p
+
+		entries, err := s.shapeMusicOnce(ctx, chunkIn)
+		if err != nil {
+			return nil, err
+		}
+		accumulated = append(accumulated, entries...)
+		known = append(known, entries...)
+		remaining = rest
+	}
+	return accumulated, nil
+}
+
+// contextLimit returns the configured context token limit, falling back to
+// DefaultContextLimit when the Config field was not set (e.g. in tests).
+func (s *Shaper) contextLimit() int {
+	if s.cfg.ContextLimit <= 0 {
+		return DefaultContextLimit
+	}
+	return s.cfg.ContextLimit
+}
+
+// takeBodyChunk returns the largest prefix of body (split at a line boundary)
+// that fits within the model's context window given the current skip list, and
+// the remainder as rest. When the body already fits, rest is empty.
+func (s *Shaper) takeBodyChunk(in MusicInput, body string) (chunk, rest string) {
+	emptyPrompt := promptMusicExtract(in, "")
+	fixedTokens := (len(systemPromptMusic) + len(emptyPrompt)) / charsPerToken
+	available := s.contextLimit() - contextHeadroom - fixedTokens
+	if available <= 0 {
+		// Skip list alone fills the context; pass the full body and let the
+		// per-call max_tokens clamp handle the output budget.
+		return body, ""
+	}
+	bodyBudget := available * charsPerToken
+	if len(body) <= bodyBudget {
+		return body, ""
+	}
+
+	lines := strings.Split(body, "\n")
+	var cur strings.Builder
+	for i, line := range lines {
+		lineWithNL := line + "\n"
+		if cur.Len()+len(lineWithNL) > bodyBudget && cur.Len() > 0 {
+			return strings.TrimRight(cur.String(), "\n"), strings.Join(lines[i:], "\n")
+		}
+		cur.WriteString(lineWithNL)
+	}
+	return strings.TrimRight(cur.String(), "\n"), ""
+}
+
+// shapeMusicOnce issues a single LLM call for the body in in.Post.Selftext.
+// It clamps max_tokens so the request fits within the model's context window.
+func (s *Shaper) shapeMusicOnce(ctx context.Context, in MusicInput) ([]MusicEntry, error) {
+	prompt := promptMusicExtract(in, in.Post.Selftext)
+
+	predicted := predictMusicMaxTokens(in.Post.Selftext)
+	inputTokens := (len(systemPromptMusic) + len(prompt)) / charsPerToken
+	available := max(s.contextLimit()-inputTokens-contextHeadroom, musicMaxTokensFloor)
+	predicted = min(predicted, available)
+
 	req := openai.ChatCompletionRequest{
 		Model:              s.cfg.Model,
 		Temperature:        0.1,
-		MaxTokens:          predictMusicMaxTokens(in.Post.Selftext),
+		MaxTokens:          predicted,
 		ChatTemplateKwargs: map[string]any{"enable_thinking": false},
 		Messages: []openai.ChatCompletionMessage{
 			{Role: openai.ChatMessageRoleSystem, Content: systemPromptMusic},

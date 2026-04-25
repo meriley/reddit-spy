@@ -98,8 +98,9 @@ Return ONLY the JSON object, nothing else.`,
 
 // promptMusicExtract is the user prompt for the music-digest shaper. Passes
 // the already-known entries so the model can skip duplicates across days /
-// threads / subreddits.
-func promptMusicExtract(in MusicInput) string {
+// threads / subreddits. body is the post selftext for this call; the caller
+// owns sizing (via chunking or direct pass-through).
+func promptMusicExtract(in MusicInput, body string) string {
 	knownJSON, _ := json.Marshal(shrinkForSkipList(in.KnownEntries))
 	return fmt.Sprintf(`Extract music releases from the Reddit post below.
 
@@ -126,7 +127,7 @@ Return ONLY the JSON object, nothing else.`,
 		in.Post.Author,
 		in.Post.Subreddit,
 		quoteSingleLine(in.Post.Title),
-		clipForPrompt(in.Post.Selftext, 8000),
+		body,
 	)
 }
 
